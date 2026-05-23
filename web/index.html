@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Voice Input Assistant</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="workspace" aria-labelledby="page-title">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Voice Assistant MVP</p>
+            <h1 id="page-title">AI 语音输入助手</h1>
+          </div>
+          <div class="status-pill" id="statusPill" aria-live="polite">
+            <i data-lucide="circle-dot"></i>
+            <span id="statusText">待输入</span>
+          </div>
+        </header>
+
+        <section class="recorder-surface" aria-label="语音输入">
+          <div class="recorder-copy">
+            <p class="section-label">语音输入</p>
+            <h2>说出想法，生成可直接使用的文本</h2>
+            <p>录音后会把音频发送到本地转写接口，再根据所选风格生成可直接使用的文本。</p>
+            <p class="helper-note" id="environmentNote"></p>
+          </div>
+
+          <div class="recorder-controls">
+            <button class="record-button" id="recordButton" type="button" aria-pressed="false">
+              <span class="record-ring">
+                <i data-lucide="mic"></i>
+              </span>
+              <span id="recordButtonText">开始说话</span>
+            </button>
+            <div class="meter" id="meter" aria-hidden="true">
+              <span></span>
+              <span></span>
+              <span></span>
+              <span></span>
+              <span></span>
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+            <p class="timer" id="timer">00:00</p>
+          </div>
+        </section>
+
+        <section class="style-strip" aria-label="文本风格">
+          <button class="style-tab active" type="button" data-style="original">原文</button>
+          <button class="style-tab" type="button" data-style="formal">正式</button>
+          <button class="style-tab" type="button" data-style="concise">简洁</button>
+          <button class="style-tab" type="button" data-style="polite">礼貌</button>
+          <button class="style-tab" type="button" data-style="summary">总结</button>
+        </section>
+
+        <section class="result-grid" aria-label="识别结果">
+          <article class="text-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="section-label">ASR</p>
+                <h3>原始转写</h3>
+              </div>
+              <span class="panel-meta" id="transcriptMeta">等待语音输入</span>
+            </div>
+            <div class="text-box" id="transcriptText">点击“开始说话”后，这里会显示模拟的实时转写内容。</div>
+          </article>
+
+          <article class="text-panel accent-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="section-label">AI</p>
+                <h3>优化结果</h3>
+              </div>
+              <span class="panel-meta" id="polishMeta">未生成</span>
+            </div>
+            <div class="text-box" id="polishedText">停止录音后，AI 会根据所选风格生成优化结果。</div>
+          </article>
+        </section>
+
+        <section class="action-bar" aria-label="操作">
+          <button class="ghost-button" id="copyOriginalButton" type="button">
+            <i data-lucide="copy"></i>
+            复制原文
+          </button>
+          <button class="primary-button" id="copyPolishedButton" type="button">
+            <i data-lucide="clipboard-check"></i>
+            复制优化结果
+          </button>
+          <button class="ghost-button" id="regenerateButton" type="button">
+            <i data-lucide="refresh-cw"></i>
+            重新生成
+          </button>
+          <button class="ghost-button danger" id="clearButton" type="button">
+            <i data-lucide="trash-2"></i>
+            清空
+          </button>
+        </section>
+
+        <p class="feedback" id="feedback" role="status" aria-live="polite"></p>
+      </section>
+    </main>
+
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
