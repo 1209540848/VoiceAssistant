@@ -1,27 +1,6 @@
-const styleOutputs = {
-  original:
-    "明天下午三点我们开个会，讨论一下这个方案，然后把重点整理成三条，发给产品和技术同学看一下。",
-  formal:
-    "我们将于明天下午三点召开会议，讨论该方案，并将重点整理为三项内容，发送给产品和技术同学确认。",
-  concise: "明天下午三点开会讨论方案，并整理三条重点发给产品和技术同学。",
-  polite:
-    "方便的话，我们明天下午三点开会讨论一下这个方案。会后我会把重点整理成三条，再发给产品和技术同学确认。",
-  summary: "会议时间：明天下午三点。主题：讨论方案。后续动作：整理三条重点并发给产品和技术同学。"
-};
-
-const styleLabels = {
-  original: "原文",
-  formal: "正式",
-  concise: "简洁",
-  polite: "礼貌",
-  summary: "总结"
-};
-
 const state = {
   isRecording: false,
-  activeStyle: "original",
   transcript: "",
-  polished: "",
   elapsedSeconds: 0,
   timerId: null,
   mediaStream: null,
@@ -52,18 +31,21 @@ const elements = {
   timer: document.querySelector("#timer"),
   transcriptText: document.querySelector("#transcriptText"),
   transcriptMeta: document.querySelector("#transcriptMeta"),
-  polishedText: document.querySelector("#polishedText"),
-  polishMeta: document.querySelector("#polishMeta"),
-  styleTabs: document.querySelectorAll(".style-tab"),
+  sessionMeta: document.querySelector("#sessionMeta"),
+  liveStateBadge: document.querySelector("#liveStateBadge"),
+  resultCount: document.querySelector("#resultCount"),
+  traceValue: document.querySelector("#traceValue"),
+  requestValue: document.querySelector("#requestValue"),
+  timingValue: document.querySelector("#timingValue"),
+  errorValue: document.querySelector("#errorValue"),
   copyOriginalButton: document.querySelector("#copyOriginalButton"),
-  copyPolishedButton: document.querySelector("#copyPolishedButton"),
-  regenerateButton: document.querySelector("#regenerateButton"),
   clearButton: document.querySelector("#clearButton"),
   feedback: document.querySelector("#feedback"),
-  environmentNote: document.querySelector("#environmentNote")
+  environmentNote: document.querySelector("#environmentNote"),
+  controlHint: document.querySelector("#controlHint"),
+  sourceBadge: document.querySelector("#sourceBadge")
 };
 
-const TRANSCRIBE_ENDPOINT = "/api/transcribe";
 const ASR_STREAM_ENDPOINT = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/api/asr-stream`;
 
 function setStatus(label, mode = "") {
@@ -84,6 +66,26 @@ function formatTime(totalSeconds) {
   const minutes = String(Math.floor(totalSeconds / 60)).padStart(2, "0");
   const seconds = String(totalSeconds % 60).padStart(2, "0");
   return `${minutes}:${seconds}`;
+}
+
+function formatTimingSummary(timings) {
+  if (!timings) return "-";
+  const parts = [];
+  if (typeof timings.elapsedMs === "number") {
+    parts.push(`${timings.elapsedMs}ms`);
+  }
+  if (typeof timings.firstResultAt === "number") {
+    parts.push("首包已到");
+  }
+  return parts.length ? parts.join(" | ") : "-";
+}
+
+function updateDiagnostics() {
+  elements.traceValue.textContent = state.lastTraceId || "-";
+  elements.requestValue.textContent = state.lastRequestId || "-";
+  elements.timingValue.textContent = formatTimingSummary(state.lastTimings);
+  elements.errorValue.textContent = state.streamLastError || "-";
+  elements.resultCount.textContent = `${state.transcript ? state.transcript.length : 0} 字`;
 }
 
 function startTimer() {
@@ -132,33 +134,10 @@ function cleanupStream() {
   state.audioChunks = [];
 }
 
-function decodeTextFromResponse(payload) {
-  if (!payload) return "";
-  if (typeof payload === "string") return payload;
-  return (
-    payload.text ||
-    payload.transcript ||
-    payload.result?.text ||
-    payload.data?.text ||
-    payload.result ||
-    ""
-  );
-}
-
-function formatTimingSummary(timings) {
-  if (!timings) return "";
-  const parts = [];
-  if (typeof timings.elapsedMs === "number") {
-    parts.push(`总耗时 ${timings.elapsedMs}ms`);
-  }
-  if (typeof timings.firstResultAt === "number") {
-    parts.push("已收到首包");
-  }
-  return parts.join("，");
-}
-
 function bytesToBase64(buffer) {
-  const bytes = buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+  const bytes = buffer instanceof ArrayBuffer
+    ? new Uint8Array(buffer)
+    : new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
   let binary = "";
   const chunkSize = 0x8000;
   for (let i = 0; i < bytes.length; i += chunkSize) {
@@ -198,6 +177,7 @@ function createStreamSocket() {
     if (payload.type === "status") {
       if (payload.phase === "listening") {
         setStatus("实时识别中", "processing");
+        elements.liveStateBadge.textContent = "识别中";
       }
       return;
     }
@@ -207,35 +187,37 @@ function createStreamSocket() {
       state.transcript = state.streamLiveText;
       elements.transcriptText.textContent = state.streamLiveText || "正在等待识别结果...";
       elements.transcriptText.classList.toggle("empty", !state.streamLiveText);
-      const metaParts = ["实时转写中"];
-      if (payload.requestId) metaParts.push(`requestId ${payload.requestId}`);
-      elements.transcriptMeta.textContent = metaParts.join(" | ");
+      elements.transcriptMeta.textContent = payload.requestId ? `requestId ${payload.requestId}` : "实时转写中";
+      elements.liveStateBadge.textContent = "实时更新";
+      updateDiagnostics();
       return;
     }
 
     if (payload.type === "final") {
       state.streamFinalized = true;
       state.streamFinalText = payload.text || state.streamLiveText || "";
+      state.transcript = state.streamFinalText;
       state.lastTraceId = payload.traceId || state.lastTraceId || "";
       state.lastRequestId = payload.requestId || state.lastRequestId || "";
       state.lastTimings = payload.timings || null;
-      renderTranscribedText(state.streamFinalText);
-      setStatus("正在优化", "processing");
-      elements.polishedText.textContent = "正在根据风格优化文本...";
-      elements.polishedText.classList.add("empty");
+      state.streamLastError = "";
+      elements.transcriptText.textContent = state.transcript || "未识别到有效内容。";
+      elements.transcriptText.classList.toggle("empty", !state.transcript);
+      elements.transcriptMeta.textContent = state.lastRequestId
+        ? `requestId ${state.lastRequestId}`
+        : "转写完成";
+      elements.liveStateBadge.textContent = "已完成";
+      setStatus("转写完成", "done");
       setFeedback(
         [
-          payload.traceId ? `traceId: ${payload.traceId}` : "",
-          payload.requestId ? `requestId: ${payload.requestId}` : "",
-          formatTimingSummary(payload.timings)
+          state.lastTraceId ? `traceId: ${state.lastTraceId}` : "",
+          state.lastRequestId ? `requestId: ${state.lastRequestId}` : "",
+          formatTimingSummary(state.lastTimings)
         ]
           .filter(Boolean)
           .join(" | ")
       );
-      window.setTimeout(() => {
-        generatePolishedText();
-        setStatus("已生成", "done");
-      }, 520);
+      updateDiagnostics();
       return;
     }
 
@@ -243,19 +225,22 @@ function createStreamSocket() {
       state.streamFailed = true;
       state.streamLastError = payload.message || "流式转写失败";
       state.lastTraceId = payload.traceId || state.lastTraceId || "";
+      state.lastRequestId = payload.requestId || state.lastRequestId || "";
+      elements.liveStateBadge.textContent = "失败";
       setStatus("转写失败", "processing");
       elements.transcriptMeta.textContent = "真实转写失败";
-      elements.polishedText.textContent = "本次没有生成优化结果，因为真实转写失败了。";
-      elements.polishedText.classList.remove("empty");
+      elements.transcriptText.textContent = "本次未生成结果。";
+      elements.transcriptText.classList.remove("empty");
       setFeedback(
         [
-          `转写失败：${payload.message || "流式转写失败"}`,
-          payload.traceId ? `traceId: ${payload.traceId}` : "",
+          `转写失败：${state.streamLastError}`,
+          state.lastTraceId ? `traceId: ${state.lastTraceId}` : "",
           payload.retryable === false ? "不可重试" : ""
         ]
           .filter(Boolean)
           .join(" | ")
       );
+      updateDiagnostics();
     }
   });
 
@@ -295,71 +280,9 @@ function stopStreamSocket() {
   } catch {}
 }
 
-async function transcribeAudio(blob) {
-  const response = await fetch(
-    `${TRANSCRIBE_ENDPOINT}?scene=chat&language=zh&format=pcm&sample_rate=16000&model=fun-asr-realtime`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/octet-stream"
-      },
-      body: blob
-    }
-  );
-
-  if (!response.ok) {
-    let errorMessage = `转写接口返回 ${response.status}`;
-    let errorPayload = null;
-    try {
-      errorPayload = await response.json();
-      errorMessage = errorPayload.message || errorMessage;
-    } catch {}
-    const error = new Error(errorMessage);
-    error.status = response.status;
-    error.payload = errorPayload;
-    throw error;
-  }
-
-  const payload = await response.json();
-  return {
-    text: decodeTextFromResponse(payload),
-    traceId: payload.traceId || "",
-    requestId: payload.requestId || "",
-    mode: payload.mode || "realtime",
-    timings: payload.timings || null
-  };
-}
-
-function renderTranscribedText(text) {
-  state.transcript = text || "";
-  elements.transcriptText.textContent = state.transcript || "未识别到有效内容。";
-  elements.transcriptText.classList.toggle("empty", !state.transcript);
-  if (state.lastTraceId || state.lastRequestId) {
-    const metaParts = [];
-    if (state.lastTraceId) metaParts.push(`traceId ${state.lastTraceId}`);
-    if (state.lastRequestId) metaParts.push(`requestId ${state.lastRequestId}`);
-    if (state.lastTimings?.elapsedMs) metaParts.push(`${state.lastTimings.elapsedMs}ms`);
-    elements.transcriptMeta.textContent = metaParts.join(" | ");
-  } else {
-    elements.transcriptMeta.textContent = state.transcript ? "转写完成" : "未识别到内容";
-  }
-}
-
-function generatePolishedText() {
-  if (!state.transcript) {
-    setFeedback("还没有可优化的原文。");
-    return;
-  }
-  state.polished = styleOutputs[state.activeStyle];
-  elements.polishedText.textContent = state.polished;
-  elements.polishedText.classList.remove("empty");
-  elements.polishMeta.textContent = `${styleLabels[state.activeStyle]}风格`;
-}
-
 function setIdleView() {
   state.isRecording = false;
   state.transcript = "";
-  state.polished = "";
   state.lastTraceId = "";
   state.lastRequestId = "";
   state.lastTimings = null;
@@ -380,11 +303,17 @@ function setIdleView() {
   elements.meter.classList.remove("active");
   elements.transcriptText.textContent = "点击“开始说话”后，这里会显示识别结果。";
   elements.transcriptText.classList.add("empty");
-  elements.polishedText.textContent = "停止录音后，AI 会根据所选风格生成优化结果。";
-  elements.polishedText.classList.add("empty");
   elements.transcriptMeta.textContent = "等待语音输入";
-  elements.polishMeta.textContent = "未生成";
+  elements.sessionMeta.textContent = "未开始";
+  elements.liveStateBadge.textContent = "等待输入";
+  elements.resultCount.textContent = "0 字";
+  elements.traceValue.textContent = "-";
+  elements.requestValue.textContent = "-";
+  elements.timingValue.textContent = "-";
+  elements.errorValue.textContent = "-";
+  elements.controlHint.textContent = "开始后会持续发送音频帧。";
   setStatus("待输入");
+  updateDiagnostics();
 }
 
 function convertToPcm16Chunk(input, sourceSampleRate) {
@@ -410,8 +339,8 @@ function convertToPcm16Chunk(input, sourceSampleRate) {
 
   const pcm16 = new Int16Array(downsampled.length);
   for (let i = 0; i < downsampled.length; i += 1) {
-    const s = Math.max(-1, Math.min(1, downsampled[i]));
-    pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+    const sample = Math.max(-1, Math.min(1, downsampled[i]));
+    pcm16[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
   }
   return pcm16.buffer;
 }
@@ -419,7 +348,10 @@ function convertToPcm16Chunk(input, sourceSampleRate) {
 async function startRecording() {
   state.isRecording = true;
   state.transcript = "";
-  state.polished = "";
+  state.lastTraceId = "";
+  state.lastRequestId = "";
+  state.lastTimings = null;
+  state.streamLastError = "";
   setStatus("准备录音", "processing");
   setFeedback("");
   elements.recordButton.classList.add("is-recording");
@@ -428,21 +360,36 @@ async function startRecording() {
   elements.meter.classList.add("active");
   elements.transcriptText.textContent = "";
   elements.transcriptText.classList.remove("empty");
-  elements.polishedText.textContent = "录音结束后将生成优化结果。";
-  elements.polishedText.classList.add("empty");
   elements.transcriptMeta.textContent = "等待麦克风";
-  elements.polishMeta.textContent = "等待原文";
+  elements.sessionMeta.textContent = "连接中";
+  elements.liveStateBadge.textContent = "启动中";
+  elements.controlHint.textContent = "浏览器会先申请麦克风权限。";
+  elements.sourceBadge.textContent = "麦克风";
   startTimer();
 
   if (window.location.protocol === "file:") {
     setFeedback("请用 http://127.0.0.1:4173/web/index.html 打开页面，file:// 下无法正常录音。");
     setStatus("录音中", "recording");
+    state.isRecording = false;
+    stopTimer();
+    elements.recordButton.classList.remove("is-recording");
+    elements.recordButton.setAttribute("aria-pressed", "false");
+    elements.recordButtonText.textContent = "开始说话";
+    elements.meter.classList.remove("active");
+    elements.sessionMeta.textContent = "未开始";
     return;
   }
 
   if (!navigator.mediaDevices?.getUserMedia || !window.AudioContext) {
     setFeedback("当前浏览器不支持麦克风录音。");
     setStatus("录音中", "recording");
+    state.isRecording = false;
+    stopTimer();
+    elements.recordButton.classList.remove("is-recording");
+    elements.recordButton.setAttribute("aria-pressed", "false");
+    elements.recordButtonText.textContent = "开始说话";
+    elements.meter.classList.remove("active");
+    elements.sessionMeta.textContent = "未开始";
     return;
   }
 
@@ -472,10 +419,20 @@ async function startRecording() {
     createStreamSocket();
 
     setStatus("录音中", "recording");
+    elements.sessionMeta.textContent = "已连接";
+    elements.liveStateBadge.textContent = "收音中";
     elements.transcriptMeta.textContent = "正在收音";
   } catch (error) {
     setFeedback(`麦克风不可用：${error.message}`);
     setStatus("录音中", "recording");
+    state.isRecording = false;
+    stopTimer();
+    elements.recordButton.classList.remove("is-recording");
+    elements.recordButton.setAttribute("aria-pressed", "false");
+    elements.recordButtonText.textContent = "开始说话";
+    elements.meter.classList.remove("active");
+    elements.sessionMeta.textContent = "失败";
+    elements.liveStateBadge.textContent = "失败";
   }
 }
 
@@ -486,6 +443,8 @@ function stopRecording() {
   elements.recordButton.setAttribute("aria-pressed", "false");
   elements.recordButtonText.textContent = "重新说话";
   elements.meter.classList.remove("active");
+  elements.controlHint.textContent = "停止后等待最终结果。";
+  elements.sessionMeta.textContent = "收尾中";
 
   stopStreamSocket();
   state.audioChunks = [];
@@ -520,38 +479,8 @@ function bindEvents() {
     }
   });
 
-  elements.styleTabs.forEach((tab) => {
-    tab.addEventListener("click", () => {
-      state.activeStyle = tab.dataset.style;
-      elements.styleTabs.forEach((item) => item.classList.remove("active"));
-      tab.classList.add("active");
-      if (state.transcript) {
-        generatePolishedText();
-        setFeedback(`已切换为${styleLabels[state.activeStyle]}风格。`);
-      }
-    });
-  });
-
   elements.copyOriginalButton.addEventListener("click", () => {
-    copyText(state.transcript, "原文");
-  });
-
-  elements.copyPolishedButton.addEventListener("click", () => {
-    copyText(state.polished, "优化结果");
-  });
-
-  elements.regenerateButton.addEventListener("click", () => {
-    if (!state.transcript) {
-      setFeedback("还没有可重新生成的内容。");
-      return;
-    }
-    setStatus("正在优化", "processing");
-    elements.polishedText.textContent = "正在重新生成...";
-    window.setTimeout(() => {
-      generatePolishedText();
-      setStatus("已生成", "done");
-      setFeedback("已重新生成。");
-    }, 480);
+    copyText(state.transcript, "转写");
   });
 
   elements.clearButton.addEventListener("click", clearAll);
@@ -559,14 +488,12 @@ function bindEvents() {
 
 function initEnvironmentNote() {
   if (window.location.protocol === "file:") {
-    elements.environmentNote.textContent =
-      "当前通过 file:// 打开，录音不会真正工作。请改用 http://127.0.0.1:4173/web/index.html。";
+    elements.environmentNote.textContent = "file:// 下无法录音，请用本地服务地址打开。";
     elements.environmentNote.classList.add("warning-note");
     elements.recordButton.disabled = true;
     elements.recordButton.setAttribute("aria-disabled", "true");
   } else {
-    elements.environmentNote.textContent =
-      "当前页面支持真实麦克风录音；如果转写失败，会直接显示错误。";
+    elements.environmentNote.textContent = "支持真实麦克风；失败会直接提示。";
     elements.environmentNote.classList.add("success-note");
     elements.recordButton.disabled = false;
     elements.recordButton.removeAttribute("aria-disabled");

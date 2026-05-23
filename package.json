@@ -3,10 +3,17 @@
   "private": true,
   "version": "0.1.0",
   "type": "commonjs",
+  "main": "desktop/main.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "desktop": "electron .",
+    "desktop:dev": "concurrently \"npm:start\" \"npm:desktop\""
   },
   "dependencies": {
+    "electron": "^35.2.1",
     "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
   }
 }
