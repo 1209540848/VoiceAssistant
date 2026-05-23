@@ -150,6 +150,32 @@ function createWsEventMessage(traceId, type, payload = {}) {
   });
 }
 
+function createSentenceBuffer() {
+  return {
+    finalized: [],
+    current: "",
+    update(sentence) {
+      const text = String(sentence?.text || "").trim();
+      if (!text) return "";
+
+      this.current = text;
+
+      if (sentence?.sentence_end) {
+        const last = this.finalized[this.finalized.length - 1];
+        if (last !== text) {
+          this.finalized.push(text);
+        }
+      }
+
+      return text;
+    },
+    buildFinalText(fallback = "") {
+      const finalText = this.finalized.join("");
+      return finalText || this.current || fallback || "";
+    }
+  };
+}
+
 async function transcribeWithDashScope(audioBuffer, options = {}) {
   const traceId = options.traceId || createTraceId();
   const logger = typeof options.logger === "function" ? options.logger : () => {};
@@ -157,11 +183,11 @@ async function transcribeWithDashScope(audioBuffer, options = {}) {
   return new Promise((resolve, reject) => {
     let ws;
     const taskId = `${Date.now()}${Math.floor(Math.random() * 1000)}`.slice(0, 32);
-    const chunks = [];
     let settled = false;
     let started = false;
     let finishSent = false;
     let requestId = "";
+    const sentenceBuffer = createSentenceBuffer();
     const timings = {
       requestStartedAt: Date.now()
     };
@@ -296,9 +322,8 @@ async function transcribeWithDashScope(audioBuffer, options = {}) {
 
       if (event === "result-generated") {
         const sentence = message?.payload?.output?.sentence;
-        const text = sentence?.text || "";
+        const text = sentenceBuffer.update(sentence);
         if (text) {
-          chunks.push(text);
           if (!timings.firstResultAt) {
             timings.firstResultAt = Date.now();
             logger("first_result", {
@@ -318,8 +343,9 @@ async function transcribeWithDashScope(audioBuffer, options = {}) {
           message?.header?.requestId ||
           message?.header?.task_id ||
           taskId;
-        const finalText =
-          chunks.join("") || message?.payload?.output?.sentence?.text || "";
+        const finalText = sentenceBuffer.buildFinalText(
+          message?.payload?.output?.sentence?.text || ""
+        );
         logger("task_finished", {
           requestId,
           elapsedMs: timings.taskFinishedAt - timings.requestStartedAt,
@@ -511,7 +537,6 @@ const asrStreamServer = new WebSocketServer({ noServer: true });
 asrStreamServer.on("connection", (clientWs, request) => {
   const traceId = createTraceId("stream");
   const logger = (stage, details = {}) => logTranscription(traceId, stage, details);
-  const chunks = [];
   let clientFinished = false;
   let dashscopeStarted = false;
   let dashscopeFinished = false;
@@ -520,6 +545,7 @@ asrStreamServer.on("connection", (clientWs, request) => {
   let clientClosed = false;
   let sendQueue = Promise.resolve();
   const pendingFrames = [];
+  const sentenceBuffer = createSentenceBuffer();
   const timings = {
     requestStartedAt: Date.now()
   };
@@ -644,9 +670,8 @@ asrStreamServer.on("connection", (clientWs, request) => {
 
       if (event === "result-generated") {
         const sentence = message?.payload?.output?.sentence;
-        const text = sentence?.text || "";
+        const text = sentenceBuffer.update(sentence);
         if (text) {
-          chunks.push(text);
           if (!timings.firstResultAt) {
             timings.firstResultAt = Date.now();
             logger("upstream_first_result", {
@@ -663,7 +688,9 @@ asrStreamServer.on("connection", (clientWs, request) => {
       }
 
       if (event === "task-finished") {
-        const finalText = chunks.join("") || message?.payload?.output?.sentence?.text || "";
+        const finalText = sentenceBuffer.buildFinalText(
+          message?.payload?.output?.sentence?.text || ""
+        );
         finishStream(finalText);
         return;
       }

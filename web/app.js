@@ -19,7 +19,8 @@ const state = {
   streamFinalized: false,
   streamLiveText: "",
   streamFinalText: "",
-  streamLastError: ""
+  streamLastError: "",
+  captureMode: window.voiceAssistantDesktop ? "desktop" : "browser"
 };
 
 const elements = {
@@ -47,6 +48,93 @@ const elements = {
 };
 
 const ASR_STREAM_ENDPOINT = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/api/asr-stream`;
+
+function handleRecognizerEvent(payload) {
+  if (!payload) return;
+
+  if (payload.type === "capture-status") {
+    if (payload.phase === "stream-open") {
+      elements.sessionMeta.textContent = "桌面采集中";
+      elements.liveStateBadge.textContent = "收音中";
+    }
+    if (payload.phase === "capture-stderr" && payload.message) {
+      setFeedback(payload.message.trim());
+    }
+    if (payload.phase === "capture-exit" && state.isRecording) {
+      elements.sessionMeta.textContent = "采集已停止";
+    }
+    return;
+  }
+
+  if (payload.type === "status") {
+    if (payload.phase === "listening") {
+      setStatus("实时识别中", "processing");
+      elements.liveStateBadge.textContent = "识别中";
+    }
+    return;
+  }
+
+  if (payload.type === "partial") {
+    state.streamLiveText = payload.text || "";
+    state.transcript = state.streamLiveText;
+    elements.transcriptText.textContent = state.streamLiveText || "正在等待识别结果...";
+    elements.transcriptText.classList.toggle("empty", !state.streamLiveText);
+    elements.transcriptMeta.textContent = payload.requestId ? `requestId ${payload.requestId}` : "实时转写中";
+    elements.liveStateBadge.textContent = "实时更新";
+    updateDiagnostics();
+    return;
+  }
+
+  if (payload.type === "final") {
+    state.streamFinalized = true;
+    state.streamFinalText = payload.text || state.streamLiveText || "";
+    state.transcript = state.streamFinalText;
+    state.lastTraceId = payload.traceId || state.lastTraceId || "";
+    state.lastRequestId = payload.requestId || state.lastRequestId || "";
+    state.lastTimings = payload.timings || null;
+    state.streamLastError = "";
+    elements.transcriptText.textContent = state.transcript || "未识别到有效内容。";
+    elements.transcriptText.classList.toggle("empty", !state.transcript);
+    elements.transcriptMeta.textContent = state.lastRequestId
+      ? `requestId ${state.lastRequestId}`
+      : "转写完成";
+    elements.liveStateBadge.textContent = "已完成";
+    setStatus("转写完成", "done");
+    setFeedback(
+      [
+        state.lastTraceId ? `traceId: ${state.lastTraceId}` : "",
+        state.lastRequestId ? `requestId: ${state.lastRequestId}` : "",
+        formatTimingSummary(state.lastTimings)
+      ]
+        .filter(Boolean)
+        .join(" | ")
+    );
+    updateDiagnostics();
+    return;
+  }
+
+  if (payload.type === "error") {
+    state.streamFailed = true;
+    state.streamLastError = payload.message || "流式转写失败";
+    state.lastTraceId = payload.traceId || state.lastTraceId || "";
+    state.lastRequestId = payload.requestId || state.lastRequestId || "";
+    elements.liveStateBadge.textContent = "失败";
+    setStatus("转写失败", "processing");
+    elements.transcriptMeta.textContent = "真实转写失败";
+    elements.transcriptText.textContent = "本次未生成结果。";
+    elements.transcriptText.classList.remove("empty");
+    setFeedback(
+      [
+        `转写失败：${state.streamLastError}`,
+        state.lastTraceId ? `traceId: ${state.lastTraceId}` : "",
+        payload.retryable === false ? "不可重试" : ""
+      ]
+        .filter(Boolean)
+        .join(" | ")
+    );
+    updateDiagnostics();
+  }
+}
 
 function setStatus(label, mode = "") {
   elements.statusText.textContent = label;
@@ -174,74 +262,7 @@ function createStreamSocket() {
       return;
     }
 
-    if (payload.type === "status") {
-      if (payload.phase === "listening") {
-        setStatus("实时识别中", "processing");
-        elements.liveStateBadge.textContent = "识别中";
-      }
-      return;
-    }
-
-    if (payload.type === "partial") {
-      state.streamLiveText = payload.text || "";
-      state.transcript = state.streamLiveText;
-      elements.transcriptText.textContent = state.streamLiveText || "正在等待识别结果...";
-      elements.transcriptText.classList.toggle("empty", !state.streamLiveText);
-      elements.transcriptMeta.textContent = payload.requestId ? `requestId ${payload.requestId}` : "实时转写中";
-      elements.liveStateBadge.textContent = "实时更新";
-      updateDiagnostics();
-      return;
-    }
-
-    if (payload.type === "final") {
-      state.streamFinalized = true;
-      state.streamFinalText = payload.text || state.streamLiveText || "";
-      state.transcript = state.streamFinalText;
-      state.lastTraceId = payload.traceId || state.lastTraceId || "";
-      state.lastRequestId = payload.requestId || state.lastRequestId || "";
-      state.lastTimings = payload.timings || null;
-      state.streamLastError = "";
-      elements.transcriptText.textContent = state.transcript || "未识别到有效内容。";
-      elements.transcriptText.classList.toggle("empty", !state.transcript);
-      elements.transcriptMeta.textContent = state.lastRequestId
-        ? `requestId ${state.lastRequestId}`
-        : "转写完成";
-      elements.liveStateBadge.textContent = "已完成";
-      setStatus("转写完成", "done");
-      setFeedback(
-        [
-          state.lastTraceId ? `traceId: ${state.lastTraceId}` : "",
-          state.lastRequestId ? `requestId: ${state.lastRequestId}` : "",
-          formatTimingSummary(state.lastTimings)
-        ]
-          .filter(Boolean)
-          .join(" | ")
-      );
-      updateDiagnostics();
-      return;
-    }
-
-    if (payload.type === "error") {
-      state.streamFailed = true;
-      state.streamLastError = payload.message || "流式转写失败";
-      state.lastTraceId = payload.traceId || state.lastTraceId || "";
-      state.lastRequestId = payload.requestId || state.lastRequestId || "";
-      elements.liveStateBadge.textContent = "失败";
-      setStatus("转写失败", "processing");
-      elements.transcriptMeta.textContent = "真实转写失败";
-      elements.transcriptText.textContent = "本次未生成结果。";
-      elements.transcriptText.classList.remove("empty");
-      setFeedback(
-        [
-          `转写失败：${state.streamLastError}`,
-          state.lastTraceId ? `traceId: ${state.lastTraceId}` : "",
-          payload.retryable === false ? "不可重试" : ""
-        ]
-          .filter(Boolean)
-          .join(" | ")
-      );
-      updateDiagnostics();
-    }
+    handleRecognizerEvent(payload);
   });
 
   socket.addEventListener("close", () => {
@@ -294,6 +315,7 @@ function setIdleView() {
   state.streamLiveText = "";
   state.streamFinalText = "";
   state.streamLastError = "";
+  state.captureMode = window.voiceAssistantDesktop ? "desktop" : "browser";
   stopTimer();
   cleanupStream();
   elements.timer.textContent = "00:00";
@@ -311,7 +333,9 @@ function setIdleView() {
   elements.requestValue.textContent = "-";
   elements.timingValue.textContent = "-";
   elements.errorValue.textContent = "-";
-  elements.controlHint.textContent = "开始后会持续发送音频帧。";
+  elements.controlHint.textContent = state.captureMode === "desktop"
+    ? "桌面端将从系统麦克风采集。"
+    : "浏览器页面将持续发送音频帧。";
   setStatus("待输入");
   updateDiagnostics();
 }
@@ -364,8 +388,31 @@ async function startRecording() {
   elements.sessionMeta.textContent = "连接中";
   elements.liveStateBadge.textContent = "启动中";
   elements.controlHint.textContent = "浏览器会先申请麦克风权限。";
-  elements.sourceBadge.textContent = "麦克风";
+  elements.sourceBadge.textContent = state.captureMode === "desktop" ? "系统麦克风" : "浏览器麦克风";
   startTimer();
+
+  if (state.captureMode === "desktop") {
+    try {
+      const result = await window.voiceAssistantDesktop.startRecording();
+      if (!result?.ok) {
+        throw new Error(result?.message || "桌面录音启动失败");
+      }
+      setStatus("录音中", "recording");
+      elements.sessionMeta.textContent = "桌面采集中";
+      elements.liveStateBadge.textContent = "收音中";
+      elements.transcriptMeta.textContent = "正在收音";
+      elements.controlHint.textContent = "系统麦克风正在输出 16k PCM。";
+    } catch (error) {
+      setFeedback(`桌面录音不可用：${error.message}`);
+      state.captureMode = "browser";
+      elements.sourceBadge.textContent = "浏览器麦克风";
+      elements.controlHint.textContent = "桌面采集失败，已切回浏览器采集。";
+    }
+
+    if (state.captureMode === "desktop") {
+      return;
+    }
+  }
 
   if (window.location.protocol === "file:") {
     setFeedback("请用 http://127.0.0.1:4173/web/index.html 打开页面，file:// 下无法正常录音。");
@@ -394,7 +441,14 @@ async function startRecording() {
   }
 
   try {
-    state.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    state.mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }
+    });
     state.audioChunks = [];
     state.audioContext = new (window.AudioContext || window.webkitAudioContext)();
     if (state.audioContext.state === "suspended") {
@@ -446,7 +500,11 @@ function stopRecording() {
   elements.controlHint.textContent = "停止后等待最终结果。";
   elements.sessionMeta.textContent = "收尾中";
 
-  stopStreamSocket();
+  if (state.captureMode === "desktop" && window.voiceAssistantDesktop) {
+    window.voiceAssistantDesktop.stopRecording();
+  } else {
+    stopStreamSocket();
+  }
   state.audioChunks = [];
   cleanupStream();
 }
@@ -503,6 +561,10 @@ function initEnvironmentNote() {
 bindEvents();
 initEnvironmentNote();
 setIdleView();
+
+if (window.voiceAssistantDesktop?.onRecorderEvent) {
+  window.voiceAssistantDesktop.onRecorderEvent(handleRecognizerEvent);
+}
 
 if (window.lucide) {
   window.lucide.createIcons();
