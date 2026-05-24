@@ -48,20 +48,64 @@ const elements = {
 };
 
 const ASR_STREAM_ENDPOINT = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/api/asr-stream`;
+const isFloatingView = Boolean(document.querySelector("#floatingShell"));
+
+function updateShellState(mode = "") {
+  const shell = document.querySelector("#floatingShell");
+  if (!shell) return;
+  shell.classList.toggle("is-recording", mode === "recording");
+  shell.classList.toggle("is-error", mode === "error");
+}
+
+async function autoCopyFinalText(text) {
+  if (!isFloatingView || !text) return;
+  try {
+    if (window.voiceAssistantDesktop?.writeClipboardText) {
+      await window.voiceAssistantDesktop.writeClipboardText(text);
+    } else {
+      await navigator.clipboard.writeText(text);
+    }
+    setFeedback("已复制");
+    elements.sessionMeta.textContent = "已复制";
+    elements.transcriptText.textContent = "已复制到剪贴板";
+    elements.transcriptText.classList.remove("empty");
+  } catch {
+    setFeedback("复制失败");
+    updateShellState("error");
+  }
+}
 
 function handleRecognizerEvent(payload) {
   if (!payload) return;
 
   if (payload.type === "capture-status") {
+    if (payload.phase === "capture-start") {
+      elements.sessionMeta.textContent = "听写中";
+      elements.liveStateBadge.textContent = "听写中";
+      elements.transcriptText.textContent = "正在听...";
+      elements.transcriptText.classList.add("empty");
+      elements.recordButton.classList.add("is-recording");
+      updateShellState("recording");
+    }
     if (payload.phase === "stream-open") {
       elements.sessionMeta.textContent = "桌面采集中";
       elements.liveStateBadge.textContent = "收音中";
+      updateShellState("recording");
+    }
+    if (payload.phase === "tail-buffer") {
+      elements.sessionMeta.textContent = "处理中";
     }
     if (payload.phase === "capture-stderr" && payload.message) {
       setFeedback(payload.message.trim());
     }
     if (payload.phase === "capture-exit" && state.isRecording) {
       elements.sessionMeta.textContent = "采集已停止";
+    }
+    if (payload.phase === "capture-stop") {
+      elements.recordButton.classList.remove("is-recording");
+      if (!state.streamFinalized && !state.streamFailed) {
+        updateShellState("recording");
+      }
     }
     return;
   }
@@ -70,6 +114,7 @@ function handleRecognizerEvent(payload) {
     if (payload.phase === "listening") {
       setStatus("实时识别中", "processing");
       elements.liveStateBadge.textContent = "识别中";
+      updateShellState("recording");
     }
     return;
   }
@@ -81,6 +126,7 @@ function handleRecognizerEvent(payload) {
     elements.transcriptText.classList.toggle("empty", !state.streamLiveText);
     elements.transcriptMeta.textContent = payload.requestId ? `requestId ${payload.requestId}` : "实时转写中";
     elements.liveStateBadge.textContent = "实时更新";
+    updateShellState("recording");
     updateDiagnostics();
     return;
   }
@@ -110,6 +156,9 @@ function handleRecognizerEvent(payload) {
         .join(" | ")
     );
     updateDiagnostics();
+    autoCopyFinalText(state.transcript).finally(() => {
+      window.setTimeout(() => updateShellState(""), 650);
+    });
     return;
   }
 
@@ -119,6 +168,7 @@ function handleRecognizerEvent(payload) {
     state.lastTraceId = payload.traceId || state.lastTraceId || "";
     state.lastRequestId = payload.requestId || state.lastRequestId || "";
     elements.liveStateBadge.textContent = "失败";
+    updateShellState("error");
     setStatus("转写失败", "processing");
     elements.transcriptMeta.textContent = "真实转写失败";
     elements.transcriptText.textContent = "本次未生成结果。";
@@ -138,7 +188,11 @@ function handleRecognizerEvent(payload) {
 
 function setStatus(label, mode = "") {
   elements.statusText.textContent = label;
-  elements.statusPill.className = `status-pill ${mode}`.trim();
+  if (elements.statusPill) {
+    elements.statusPill.className = `status-pill ${mode}`.trim();
+  }
+  if (mode === "recording") updateShellState("recording");
+  if (mode === "done" || !mode) updateShellState("");
 }
 
 function setFeedback(message) {
@@ -320,6 +374,7 @@ function setIdleView() {
   cleanupStream();
   elements.timer.textContent = "00:00";
   elements.recordButton.classList.remove("is-recording");
+  updateShellState("");
   elements.recordButton.setAttribute("aria-pressed", "false");
   elements.recordButtonText.textContent = "开始说话";
   elements.meter.classList.remove("active");
@@ -379,6 +434,7 @@ async function startRecording() {
   setStatus("准备录音", "processing");
   setFeedback("");
   elements.recordButton.classList.add("is-recording");
+  updateShellState("recording");
   elements.recordButton.setAttribute("aria-pressed", "true");
   elements.recordButtonText.textContent = "结束录音";
   elements.meter.classList.add("active");
@@ -386,7 +442,7 @@ async function startRecording() {
   elements.transcriptText.classList.remove("empty");
   elements.transcriptMeta.textContent = "等待麦克风";
   elements.sessionMeta.textContent = "连接中";
-  elements.liveStateBadge.textContent = "启动中";
+  elements.liveStateBadge.textContent = "听写中";
   elements.controlHint.textContent = "浏览器会先申请麦克风权限。";
   elements.sourceBadge.textContent = state.captureMode === "desktop" ? "系统麦克风" : "浏览器麦克风";
   startTimer();
@@ -399,7 +455,7 @@ async function startRecording() {
       }
       setStatus("录音中", "recording");
       elements.sessionMeta.textContent = "桌面采集中";
-      elements.liveStateBadge.textContent = "收音中";
+      elements.liveStateBadge.textContent = "听写中";
       elements.transcriptMeta.textContent = "正在收音";
       elements.controlHint.textContent = "系统麦克风正在输出 16k PCM。";
     } catch (error) {
@@ -420,6 +476,7 @@ async function startRecording() {
     state.isRecording = false;
     stopTimer();
     elements.recordButton.classList.remove("is-recording");
+    updateShellState("");
     elements.recordButton.setAttribute("aria-pressed", "false");
     elements.recordButtonText.textContent = "开始说话";
     elements.meter.classList.remove("active");
@@ -433,6 +490,7 @@ async function startRecording() {
     state.isRecording = false;
     stopTimer();
     elements.recordButton.classList.remove("is-recording");
+    updateShellState("");
     elements.recordButton.setAttribute("aria-pressed", "false");
     elements.recordButtonText.textContent = "开始说话";
     elements.meter.classList.remove("active");
@@ -482,6 +540,7 @@ async function startRecording() {
     state.isRecording = false;
     stopTimer();
     elements.recordButton.classList.remove("is-recording");
+    updateShellState("");
     elements.recordButton.setAttribute("aria-pressed", "false");
     elements.recordButtonText.textContent = "开始说话";
     elements.meter.classList.remove("active");
@@ -494,11 +553,14 @@ function stopRecording() {
   state.isRecording = false;
   stopTimer();
   elements.recordButton.classList.remove("is-recording");
+  if (!state.streamFinalized && !state.streamFailed) {
+    updateShellState("recording");
+  }
   elements.recordButton.setAttribute("aria-pressed", "false");
   elements.recordButtonText.textContent = "重新说话";
   elements.meter.classList.remove("active");
-  elements.controlHint.textContent = "停止后等待最终结果。";
-  elements.sessionMeta.textContent = "收尾中";
+  elements.controlHint.textContent = "正在整理最终结果。";
+  elements.sessionMeta.textContent = "处理中";
 
   if (state.captureMode === "desktop" && window.voiceAssistantDesktop) {
     window.voiceAssistantDesktop.stopRecording();

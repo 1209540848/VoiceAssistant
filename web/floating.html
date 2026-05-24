@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Voice Assistant Floating</title>
+    <link rel="stylesheet" href="./floating.css" />
+  </head>
+  <body>
+    <main class="floating-shell" id="floatingShell">
+      <div class="flow-track" aria-hidden="true"></div>
+      <div class="pulse-track" aria-hidden="true"></div>
+
+      <section class="visual-state" aria-label="录音状态">
+        <span class="status-dot" aria-hidden="true"></span>
+      </section>
+
+      <span class="sr-only" id="statusPill"></span>
+      <span class="sr-only" id="feedback" role="status" aria-live="polite"></span>
+      <span class="sr-only" id="timer">00:00</span>
+      <span class="sr-only" id="meter"></span>
+      <button class="sr-only" id="recordButton" type="button" aria-pressed="false">录音</button>
+      <button class="sr-only" id="copyOriginalButton" type="button">复制</button>
+      <button class="sr-only" id="clearButton" type="button">清空</button>
+      <span class="sr-only empty" id="transcriptText">等待录音</span>
+      <span class="sr-only" id="transcriptMeta">等待语音输入</span>
+      <span class="sr-only" id="liveStateBadge">等待输入</span>
+      <span class="sr-only" id="resultCount">0 字</span>
+      <span class="sr-only" id="traceValue">-</span>
+      <span class="sr-only" id="requestValue">-</span>
+      <span class="sr-only" id="timingValue">-</span>
+      <span class="sr-only" id="errorValue">-</span>
+      <span class="sr-only" id="environmentNote"></span>
+      <span class="sr-only" id="controlHint"></span>
+      <span class="sr-only" id="sourceBadge"></span>
+      <span class="sr-only" id="recordButtonText">开始说话</span>
+      <span class="sr-only" id="statusText">待输入</span>
+      <span class="sr-only" id="sessionMeta">系统麦克风</span>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
