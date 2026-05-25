@@ -16,3 +16,4 @@
 启动服务：`npm start`
 桌面端启动: npm run desktop
 打开地址(web)：`http://127.0.0.1:4173/web/index.html`
+视频:https://www.bilibili.com/video/BV1PhGf6gEu3/?spm_id_from=333.1387.homepage.video_card.click
