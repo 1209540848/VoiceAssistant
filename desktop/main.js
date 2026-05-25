@@ -10,6 +10,9 @@ const ASR_STREAM_URL = process.env.VOICE_ASSISTANT_ASR_STREAM_URL || "ws://127.0
 const SERVER_HEALTH_URL = process.env.VOICE_ASSISTANT_HEALTH_URL || "http://127.0.0.1:4173/api/health";
 const PREBUFFER_LIMIT_BYTES = 32000 * 2;
 const TAIL_BUFFER_MS = 500;
+const MAIN_WINDOW_WIDTH = 1180;
+const MAIN_WINDOW_DEFAULT_HEIGHT = 640;
+const MAIN_WINDOW_MIN_HEIGHT = 640;
 
 let mainWindow = null;
 let floatingWindow = null;
@@ -44,10 +47,12 @@ function createTrayIcon() {
 
 function createMainWindow() {
   mainWindow = new BrowserWindow({
-    width: 1180,
-    height: 780,
-    minWidth: 860,
-    minHeight: 620,
+    width: MAIN_WINDOW_WIDTH,
+    height: MAIN_WINDOW_DEFAULT_HEIGHT,
+    minWidth: MAIN_WINDOW_WIDTH,
+    minHeight: MAIN_WINDOW_MIN_HEIGHT,
+    useContentSize: true,
+    resizable: false,
     show: false,
     title: "VoiceAssistant",
     autoHideMenuBar: true,
@@ -84,10 +89,10 @@ function createFloatingWindow() {
   }
 
   floatingWindow = new BrowserWindow({
-    width: 220,
-    height: 44,
-    minWidth: 220,
-    minHeight: 44,
+    width: 108,
+    height: 24,
+    minWidth: 108,
+    minHeight: 24,
     show: false,
     frame: false,
     transparent: true,

@@ -37,7 +37,7 @@ button {
   height: 100vh;
   display: grid;
   place-items: center start;
-  padding: 0 16px;
+  padding: 0 9px;
   border-radius: 999px;
   background: var(--capsule-idle);
   border: 1px solid var(--capsule-idle-edge);
@@ -71,10 +71,10 @@ button {
   background:
     repeating-linear-gradient(
       100deg,
-      rgba(36, 208, 122, 0) 0 13px,
-      rgba(36, 208, 122, 0.24) 13px 25px,
-      rgba(156, 246, 181, 0.38) 25px 33px,
-      rgba(36, 208, 122, 0) 33px 55px
+      rgba(36, 208, 122, 0) 0 8px,
+      rgba(36, 208, 122, 0.24) 8px 15px,
+      rgba(156, 246, 181, 0.38) 15px 20px,
+      rgba(36, 208, 122, 0) 20px 34px
     ),
     linear-gradient(90deg, rgba(7, 26, 15, 0.3), rgba(36, 208, 122, 0.26), rgba(7, 26, 15, 0.24));
 }
@@ -84,7 +84,7 @@ button {
     radial-gradient(circle at 18% 50%, rgba(156, 246, 181, 0.52), transparent 12%),
     radial-gradient(circle at 34% 50%, rgba(36, 208, 122, 0.32), transparent 14%),
     radial-gradient(circle at 52% 50%, rgba(156, 246, 181, 0.2), transparent 16%);
-  filter: blur(8px);
+  filter: blur(5px);
 }
 
 .visual-state {
@@ -92,13 +92,13 @@ button {
   z-index: 2;
   display: grid;
   place-items: center;
-  width: 12px;
-  height: 12px;
+  width: 8px;
+  height: 8px;
 }
 
 .status-dot {
-  width: 7px;
-  height: 7px;
+  width: 5px;
+  height: 5px;
   border-radius: 999px;
   background: var(--capsule-idle-dot);
 }
@@ -119,12 +119,12 @@ button {
 }
 
 .floating-shell.is-recording .status-dot {
-  width: 8px;
-  height: 8px;
+  width: 5px;
+  height: 5px;
   background: var(--capsule-green-soft);
   box-shadow:
-    0 0 0 6px rgba(156, 246, 181, 0.14),
-    0 0 24px rgba(36, 208, 122, 0.82);
+    0 0 0 4px rgba(156, 246, 181, 0.14),
+    0 0 15px rgba(36, 208, 122, 0.82);
   animation: dot-listening 0.86s ease-in-out infinite;
 }
 
@@ -143,8 +143,8 @@ button {
 .floating-shell.is-error .status-dot {
   background: var(--capsule-red);
   box-shadow:
-    0 0 0 6px rgba(239, 99, 87, 0.12),
-    0 0 20px rgba(239, 99, 87, 0.56);
+    0 0 0 4px rgba(239, 99, 87, 0.12),
+    0 0 12px rgba(239, 99, 87, 0.56);
 }
 
 .sr-only {

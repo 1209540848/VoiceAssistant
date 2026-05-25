@@ -3,6 +3,7 @@
   --sidebar: #f5f5f4;
   --surface: #ffffff;
   --surface-soft: #f7f7f6;
+  --surface-warm: #fbfaf7;
   --surface-muted: #f1f1ef;
   --line: #e6e6e2;
   --line-strong: #d8d8d2;
@@ -23,7 +24,10 @@
 
 html,
 body {
-  min-height: 100%;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 body {
@@ -56,19 +60,22 @@ svg {
 }
 
 .desktop-shell {
-  min-height: 100vh;
+  width: 100vw;
+  height: 100vh;
   display: grid;
-  grid-template-columns: 202px minmax(0, 1fr);
-  padding: 10px;
-  gap: 10px;
+  grid-template-columns: 214px minmax(0, 1fr);
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
 }
 
 .sidebar {
-  min-height: calc(100vh - 20px);
+  height: 100vh;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   padding: 18px 12px;
-  border-radius: 16px;
+  border-radius: 0;
   background: var(--sidebar);
 }
 
@@ -120,12 +127,12 @@ svg {
 
 .nav-item {
   width: 100%;
-  min-height: 38px;
+  min-height: 40px;
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 0 12px;
-  border-radius: 10px;
+  border-radius: 11px;
   background: transparent;
   color: #2f3338;
   font-size: 14px;
@@ -135,7 +142,7 @@ svg {
 
 .nav-item:hover,
 .nav-item.is-active {
-  background: #e8e8e6;
+  background: #e4e4e1;
 }
 
 .nav-item.muted {
@@ -145,16 +152,23 @@ svg {
 .content-shell {
   position: relative;
   min-width: 0;
-  min-height: calc(100vh - 20px);
-  padding: 26px;
-  border-radius: 16px;
+  height: 100vh;
+  min-height: 0;
+  padding: 30px 34px;
+  border-radius: 18px 0 0 18px;
   background: var(--surface);
   overflow: hidden;
 }
 
 .page-view {
   display: none;
-  min-height: calc(100vh - 72px);
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow-y: scroll;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+  padding-right: 8px;
 }
 
 .page-view.is-active {
@@ -172,7 +186,7 @@ svg {
 
 .hero-header h1,
 .page-header h1 {
-  font-size: 25px;
+  font-size: 28px;
   line-height: 1.2;
   letter-spacing: 0;
 }
@@ -249,44 +263,48 @@ kbd {
 
 .overview-card {
   display: grid;
-  grid-template-columns: minmax(280px, 1.2fr) minmax(320px, 1fr);
-  gap: 16px;
-  padding: 16px;
-  border-radius: 18px;
-  background: var(--surface-soft);
-  margin-bottom: 24px;
+  grid-template-columns: minmax(420px, 1.35fr) minmax(300px, 0.85fr);
+  gap: 18px;
+  margin-bottom: 22px;
 }
 
 .dictation-console {
-  min-height: 172px;
+  min-height: 206px;
   display: grid;
-  grid-template-columns: 160px minmax(0, 1fr);
-  grid-template-rows: auto auto auto;
+  grid-template-columns: 176px minmax(0, 1fr);
+  grid-template-rows: 1fr auto;
   align-items: center;
-  column-gap: 22px;
-  padding: 18px;
-  border-radius: 16px;
-  background: var(--surface);
+  column-gap: 28px;
+  padding: 22px 26px;
+  border: 1px solid rgba(27, 105, 86, 0.08);
+  border-radius: 26px;
+  background:
+    radial-gradient(circle at 18% 18%, rgba(27, 105, 86, 0.1), transparent 34%),
+    linear-gradient(135deg, #fbfffc 0%, #f4f8f4 52%, #fff7e6 100%);
+  box-shadow: 0 20px 54px rgba(24, 33, 28, 0.08);
 }
 
 .record-button {
-  grid-row: 1 / 4;
-  width: 144px;
-  height: 116px;
+  grid-row: 1 / 3;
+  width: 154px;
+  height: 154px;
   display: grid;
   place-items: center;
   align-content: center;
   gap: 10px;
-  border: 1px solid rgba(27, 105, 86, 0.18);
-  border-radius: 24px;
-  background: #f8fbf9;
+  border: 1px solid rgba(27, 105, 86, 0.22);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
   color: var(--brand);
   cursor: pointer;
-  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+  box-shadow:
+    inset 0 0 0 10px rgba(27, 105, 86, 0.035),
+    0 18px 40px rgba(27, 105, 86, 0.08);
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
 }
 
 .record-button:hover {
-  transform: translateY(-1px);
+  transform: translateY(-2px);
   border-color: rgba(27, 105, 86, 0.36);
 }
 
@@ -294,36 +312,41 @@ kbd {
   border-color: rgba(247, 189, 85, 0.58);
   background: #fff8e8;
   color: #8d5b12;
+  box-shadow:
+    inset 0 0 0 10px rgba(247, 189, 85, 0.11),
+    0 20px 46px rgba(247, 189, 85, 0.2);
 }
 
 .record-ring {
-  width: 48px;
-  height: 48px;
+  width: 56px;
+  height: 56px;
   display: grid;
   place-items: center;
-  border-radius: 17px;
+  border-radius: 20px;
   background: currentColor;
   color: #fff;
 }
 
 #recordButtonText {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 700;
 }
 
 .meter {
   display: grid;
-  grid-template-columns: repeat(8, 7px);
-  gap: 6px;
+  grid-template-columns: repeat(8, 8px);
+  gap: 8px;
   align-items: center;
-  height: 34px;
+  justify-content: center;
+  height: 58px;
+  padding: 0 4px;
 }
 
 .meter span {
-  width: 7px;
-  height: 8px;
+  width: 8px;
+  height: 10px;
   border-radius: 999px;
-  background: rgba(27, 105, 86, 0.2);
+  background: rgba(27, 105, 86, 0.18);
   transition: height 180ms ease, background 180ms ease;
 }
 
@@ -340,10 +363,18 @@ kbd {
 .meter.active span:nth-child(7) { animation-delay: 480ms; }
 .meter.active span:nth-child(8) { animation-delay: 560ms; }
 
+.dictation-copy {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  align-self: start;
+}
+
 .timer {
   color: var(--text);
-  font-size: 21px;
-  font-weight: 800;
+  font-size: 34px;
+  line-height: 1;
+  font-weight: 850;
   font-variant-numeric: tabular-nums;
 }
 
@@ -355,7 +386,7 @@ kbd {
 .metrics-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  gap: 12px;
 }
 
 .metric-card,
@@ -366,23 +397,30 @@ kbd {
 }
 
 .metric-card {
-  min-height: 78px;
+  min-height: 96px;
   display: grid;
-  grid-template-columns: 24px 1fr;
+  grid-template-columns: 30px 1fr;
   grid-template-rows: auto auto;
-  column-gap: 9px;
+  column-gap: 10px;
   align-content: center;
-  padding: 14px;
+  padding: 16px;
+  box-shadow: 0 12px 30px rgba(18, 19, 21, 0.035);
 }
 
 .metric-card svg {
   grid-row: 1 / 3;
+  width: 24px;
+  height: 24px;
+  padding: 5px;
+  border-radius: 999px;
+  background: var(--surface-soft);
   color: var(--muted);
 }
 
 .metric-card strong {
-  font-size: 20px;
+  font-size: 24px;
   line-height: 1.1;
+  letter-spacing: 0;
 }
 
 .metric-card span {
@@ -393,12 +431,39 @@ kbd {
 
 .home-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.8fr);
+  grid-template-columns: minmax(0, 1.6fr) minmax(260px, 0.65fr);
   gap: 16px;
 }
 
 .soft-card {
-  padding: 16px;
+  padding: 18px;
+  box-shadow: 0 12px 34px rgba(18, 19, 21, 0.035);
+}
+
+.last-input-card,
+.shortcut-card {
+  border-color: rgba(18, 19, 21, 0.09);
+}
+
+.last-input-card {
+  min-height: 236px;
+}
+
+.shortcut-card {
+  background: var(--surface-warm);
+}
+
+.last-input-card .section-heading,
+.shortcut-card .section-heading {
+  margin-bottom: 12px;
+}
+
+.last-input-card .text-box {
+  border-color: rgba(18, 19, 21, 0.08);
+}
+
+.last-input-card .action-bar {
+  justify-content: flex-end;
 }
 
 .section-heading {
@@ -415,12 +480,12 @@ kbd {
 }
 
 .text-box {
-  min-height: 140px;
+  min-height: 156px;
   margin: 0;
   padding: 14px;
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: var(--surface-soft);
+  background: #fafafa;
   color: var(--text);
   font-size: 15px;
   line-height: 1.7;
@@ -445,13 +510,13 @@ kbd {
 
 .ghost-button,
 .primary-button {
-  min-height: 38px;
+  min-height: 40px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
   padding: 8px 13px;
-  border-radius: 11px;
+  border-radius: 12px;
   border: 1px solid var(--line);
   background: var(--surface-soft);
   color: var(--text);
@@ -471,7 +536,7 @@ kbd {
 
 .shortcut-list {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .shortcut-list div,
@@ -480,9 +545,9 @@ kbd {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: 46px;
+  min-height: 42px;
   padding: 0 12px;
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: 12px;
   background: var(--surface-soft);
 }
@@ -675,13 +740,13 @@ kbd {
   }
 }
 
-@media (max-width: 1120px) {
+@media (max-width: 1120px) and (pointer: coarse) {
   .desktop-shell {
     grid-template-columns: 1fr;
   }
 
   .sidebar {
-    min-height: auto;
+    height: auto;
   }
 
   .nav-list,
@@ -700,7 +765,7 @@ kbd {
   }
 }
 
-@media (max-width: 720px) {
+@media (max-width: 720px) and (pointer: coarse) {
   .desktop-shell {
     padding: 0;
   }
