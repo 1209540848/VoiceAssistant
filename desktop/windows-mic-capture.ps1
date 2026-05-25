@@ -19,6 +19,19 @@ public static class WindowsMicCapture
     private static bool running = true;
     private static Stream output;
 
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+    private struct WaveInCaps
+    {
+        public ushort wMid;
+        public ushort wPid;
+        public uint vDriverVersion;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string szPname;
+        public uint dwFormats;
+        public ushort wChannels;
+        public ushort wReserved1;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct WaveFormatEx
     {
@@ -50,6 +63,12 @@ public static class WindowsMicCapture
     private static extern int waveInOpen(out IntPtr hWaveIn, int uDeviceID, ref WaveFormatEx lpFormat, WaveInProc dwCallback, IntPtr dwInstance, int dwFlags);
 
     [DllImport("winmm.dll")]
+    private static extern int waveInGetNumDevs();
+
+    [DllImport("winmm.dll", CharSet = CharSet.Auto)]
+    private static extern int waveInGetDevCaps(int uDeviceID, out WaveInCaps lpCaps, int uSize);
+
+    [DllImport("winmm.dll")]
     private static extern int waveInPrepareHeader(IntPtr hWaveIn, IntPtr lpWaveInHdr, int uSize);
 
     [DllImport("winmm.dll")]
@@ -70,8 +89,22 @@ public static class WindowsMicCapture
     [DllImport("winmm.dll")]
     private static extern int waveInClose(IntPtr hWaveIn);
 
-    public static int Main()
+    public static int Main(string[] args)
     {
+        if (args.Length > 0 && args[0] == "--list-devices")
+        {
+            return ListDevices();
+        }
+
+        int deviceId = -1;
+        for (int i = 0; i < args.Length - 1; i++)
+        {
+            if (args[i] == "--device")
+            {
+                int.TryParse(args[i + 1], out deviceId);
+            }
+        }
+
         output = Console.OpenStandardOutput();
         Console.CancelKeyPress += delegate(object sender, ConsoleCancelEventArgs e) {
             e.Cancel = true;
@@ -89,7 +122,7 @@ public static class WindowsMicCapture
         format.cbSize = 0;
 
         callback = OnWaveIn;
-        int result = waveInOpen(out waveInHandle, -1, ref format, callback, IntPtr.Zero, CALLBACK_FUNCTION);
+        int result = waveInOpen(out waveInHandle, deviceId, ref format, callback, IntPtr.Zero, CALLBACK_FUNCTION);
         if (result != MMSYSERR_NOERROR)
         {
             Console.Error.WriteLine("waveInOpen failed: " + result);
@@ -152,6 +185,28 @@ public static class WindowsMicCapture
         return 0;
     }
 
+    private static int ListDevices()
+    {
+        int count = waveInGetNumDevs();
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+        Console.Write("[");
+        for (int i = 0; i < count; i++)
+        {
+            WaveInCaps caps;
+            int result = waveInGetDevCaps(i, out caps, Marshal.SizeOf(typeof(WaveInCaps)));
+            if (result != MMSYSERR_NOERROR) continue;
+            if (i > 0) Console.Write(",");
+            Console.Write("{\"id\":" + i + ",\"name\":\"" + EscapeJson(caps.szPname) + "\",\"channels\":" + caps.wChannels + "}");
+        }
+        Console.Write("]");
+        return 0;
+    }
+
+    private static string EscapeJson(string value)
+    {
+        return (value ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"");
+    }
+
     private static void OnWaveIn(IntPtr hwi, int uMsg, IntPtr dwInstance, IntPtr dwParam1, IntPtr dwParam2)
     {
         if (uMsg != WIM_DATA || !running) return;
@@ -176,4 +231,5 @@ public static class WindowsMicCapture
 }
 "@
 
-[WindowsMicCapture]::Main()
+$exitCode = [WindowsMicCapture]::Main($args)
+exit $exitCode

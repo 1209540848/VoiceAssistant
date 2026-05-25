@@ -20,6 +20,16 @@ const state = {
   streamLiveText: "",
   streamFinalText: "",
   streamLastError: "",
+  postProcessedText: "",
+  settings: {
+    shortcut: "CommandOrControl+Space",
+    microphoneDeviceId: "",
+    microphoneDeviceName: "",
+    aiPostProcessEnabled: false,
+    aiScenario: "general",
+    activeShortcut: ""
+  },
+  scenarios: [],
   history: [],
   stats: {
     date: new Date().toISOString().slice(0, 10),
@@ -65,13 +75,36 @@ const elements = {
   hotWordsPreview: document.querySelector("#hotWordsPreview"),
   saveHotWordsButton: document.querySelector("#saveHotWordsButton"),
   syncHotWordsButton: document.querySelector("#syncHotWordsButton"),
-  clearHotWordsButton: document.querySelector("#clearHotWordsButton")
+  clearHotWordsButton: document.querySelector("#clearHotWordsButton"),
+  shortcutHint: document.querySelector("#shortcutHint"),
+  shortcutInput: document.querySelector("#shortcutInput"),
+  saveShortcutButton: document.querySelector("#saveShortcutButton"),
+  shortcutStatus: document.querySelector("#shortcutStatus"),
+  microphoneSelect: document.querySelector("#microphoneSelect"),
+  refreshMicrophonesButton: document.querySelector("#refreshMicrophonesButton"),
+  microphoneStatus: document.querySelector("#microphoneStatus"),
+  postProcessToggle: document.querySelector("#postProcessToggle"),
+  scenarioSelect: document.querySelector("#scenarioSelect"),
+  scenarioHelp: document.querySelector("#scenarioHelp")
 };
 
 const ASR_STREAM_ENDPOINT = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/api/asr-stream`;
 const isFloatingView = Boolean(document.querySelector("#floatingShell"));
 const HISTORY_STORAGE_KEY = "voiceAssistant.history.v1";
 const STATS_STORAGE_KEY = "voiceAssistant.stats.v1";
+const SCENARIO_COPY = {
+  general: "保守整理口语文本，不添加新事实。",
+  office: "适合工作沟通，语气克制清楚。",
+  tech: "保留技术名词、英文缩写、命令和产品名。",
+  email: "适合邮件和正式留言，礼貌但不替你扩写事实。"
+};
+
+function displayShortcut(shortcut = "") {
+  return String(shortcut || "CommandOrControl+Space")
+    .replaceAll("CommandOrControl", "Ctrl")
+    .replaceAll("Control", "Ctrl")
+    .replaceAll("+", " + ");
+}
 
 function switchPage(pageName) {
   elements.pageViews.forEach((view) => {
@@ -119,6 +152,122 @@ function updateStatsView() {
   if (elements.averageSpeed) {
     const minutes = Math.max((state.stats.todaySeconds || 0) / 60, 1);
     elements.averageSpeed.textContent = `${Math.round((state.stats.todayChars || 0) / minutes)} 字/分`;
+  }
+}
+
+function renderSettings() {
+  if (elements.shortcutHint) {
+    elements.shortcutHint.textContent = displayShortcut(state.settings.shortcut);
+  }
+  if (elements.shortcutInput) {
+    elements.shortcutInput.value = state.settings.shortcut || "";
+  }
+  if (elements.shortcutStatus) {
+    const active = state.settings.activeShortcut || state.settings.shortcut;
+    elements.shortcutStatus.textContent = active && active !== state.settings.shortcut
+      ? `当前生效：${displayShortcut(active)}。你设置的快捷键可能被系统占用。`
+      : `当前生效：${displayShortcut(active)}。`;
+  }
+  if (elements.postProcessToggle) {
+    elements.postProcessToggle.checked = Boolean(state.settings.aiPostProcessEnabled);
+  }
+  if (elements.scenarioSelect) {
+    elements.scenarioSelect.value = state.settings.aiScenario || "general";
+  }
+  if (elements.scenarioHelp) {
+    const found = state.scenarios.find((item) => item.id === state.settings.aiScenario);
+    elements.scenarioHelp.textContent = found?.description || SCENARIO_COPY[state.settings.aiScenario] || SCENARIO_COPY.general;
+  }
+  if (elements.microphoneStatus) {
+    elements.microphoneStatus.textContent = state.settings.microphoneDeviceName
+      ? `当前使用：${state.settings.microphoneDeviceName}`
+      : "使用系统默认输入设备。";
+  }
+}
+
+async function loadSettings() {
+  try {
+    const response = await fetch("/api/settings");
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || "设置加载失败");
+    state.settings = {
+      ...state.settings,
+      ...(data.settings || {})
+    };
+    state.scenarios = data.scenarios || [];
+    renderSettings();
+  } catch (error) {
+    setFeedback(error.message || "设置加载失败");
+  }
+}
+
+async function saveServerSettings(patch) {
+  const response = await fetch("/api/settings", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      ...state.settings,
+      ...patch
+    })
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.message || "设置保存失败");
+  state.settings = {
+    ...state.settings,
+    ...(data.settings || {})
+  };
+  renderSettings();
+  return state.settings;
+}
+
+async function saveDesktopSettings(patch) {
+  if (!window.voiceAssistantDesktop?.updateSettings) return null;
+  const result = await window.voiceAssistantDesktop.updateSettings(patch);
+  if (!result?.ok) {
+    throw new Error(result?.message || "桌面设置保存失败");
+  }
+  state.settings = {
+    ...state.settings,
+    ...(result.settings || {})
+  };
+  renderSettings();
+  return state.settings;
+}
+
+async function saveSettings(patch, label = "设置") {
+  const nextSettings = {
+    ...state.settings,
+    ...patch
+  };
+  await saveDesktopSettings(nextSettings);
+  await saveServerSettings(nextSettings);
+  setFeedback(`${label}已保存。`);
+}
+
+async function loadMicrophones() {
+  if (!elements.microphoneSelect) return;
+  elements.microphoneSelect.innerHTML = `<option value="">系统默认麦克风</option>`;
+  if (!window.voiceAssistantDesktop?.listInputDevices) {
+    elements.microphoneStatus.textContent = "浏览器模式下使用浏览器选择的麦克风。";
+    return;
+  }
+  try {
+    const result = await window.voiceAssistantDesktop.listInputDevices();
+    const devices = result?.devices || [];
+    for (const device of devices) {
+      const option = document.createElement("option");
+      option.value = String(device.id);
+      option.textContent = device.name || `麦克风 ${device.id}`;
+      elements.microphoneSelect.appendChild(option);
+    }
+    elements.microphoneSelect.value = state.settings.microphoneDeviceId || "";
+    elements.microphoneStatus.textContent = state.settings.microphoneDeviceName
+      ? `当前使用：${state.settings.microphoneDeviceName}`
+      : `已发现 ${devices.length} 个输入设备，当前使用系统默认。`;
+  } catch (error) {
+    elements.microphoneStatus.textContent = error.message || "麦克风列表加载失败。";
   }
 }
 
@@ -328,6 +477,45 @@ async function autoCopyFinalText(text) {
   }
 }
 
+async function applyPostProcess(text) {
+  const originalText = String(text || "").trim();
+  if (!originalText) {
+    return {
+      text: "",
+      mode: "empty"
+    };
+  }
+  if (!state.settings.aiPostProcessEnabled) {
+    return {
+      text: originalText,
+      mode: "disabled"
+    };
+  }
+  try {
+    const response = await fetch("/api/post-process", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        text: originalText,
+        enabled: true,
+        scenario: state.settings.aiScenario
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || "AI 后处理失败");
+    return data;
+  } catch (error) {
+    setFeedback(`AI 后处理失败，已保留原文：${error.message}`);
+    return {
+      text: originalText,
+      mode: "failed",
+      warning: error.message
+    };
+  }
+}
+
 function handleRecognizerEvent(payload) {
   if (!payload) return;
 
@@ -409,8 +597,18 @@ function handleRecognizerEvent(payload) {
         .join(" | ")
     );
     updateDiagnostics();
-    addHistoryEntry(state.transcript);
-    autoCopyFinalText(state.transcript).finally(() => {
+    applyPostProcess(state.transcript).then((result) => {
+      const finalText = result.text || state.transcript;
+      state.postProcessedText = finalText;
+      state.transcript = finalText;
+      elements.transcriptText.textContent = finalText || "未识别到有效内容。";
+      elements.transcriptMeta.textContent = state.settings.aiPostProcessEnabled
+        ? `AI 后处理：${result.mode || "done"}`
+        : elements.transcriptMeta.textContent;
+      updateDiagnostics();
+      addHistoryEntry(finalText);
+      return autoCopyFinalText(finalText);
+    }).finally(() => {
       window.setTimeout(() => updateShellState(""), 650);
     });
     return;
@@ -623,6 +821,7 @@ function setIdleView() {
   state.streamLiveText = "";
   state.streamFinalText = "";
   state.streamLastError = "";
+  state.postProcessedText = "";
   state.captureMode = window.voiceAssistantDesktop ? "desktop" : "browser";
   stopTimer();
   cleanupStream();
@@ -886,6 +1085,57 @@ function bindEvents() {
       updateHotWordsAuxiliary([]);
     });
   }
+
+  if (elements.saveShortcutButton && elements.shortcutInput) {
+    elements.saveShortcutButton.addEventListener("click", async () => {
+      try {
+        await saveSettings({ shortcut: elements.shortcutInput.value.trim() }, "快捷键");
+      } catch (error) {
+        setFeedback(error.message || "快捷键保存失败");
+      }
+    });
+  }
+
+  if (elements.refreshMicrophonesButton) {
+    elements.refreshMicrophonesButton.addEventListener("click", loadMicrophones);
+  }
+
+  if (elements.microphoneSelect) {
+    elements.microphoneSelect.addEventListener("change", async () => {
+      const selected = elements.microphoneSelect.selectedOptions[0];
+      try {
+        await saveSettings({
+          microphoneDeviceId: elements.microphoneSelect.value,
+          microphoneDeviceName: selected?.textContent || ""
+        }, "麦克风");
+        await loadMicrophones();
+      } catch (error) {
+        setFeedback(error.message || "麦克风保存失败");
+      }
+    });
+  }
+
+  if (elements.postProcessToggle) {
+    elements.postProcessToggle.addEventListener("change", async () => {
+      try {
+        await saveSettings({ aiPostProcessEnabled: elements.postProcessToggle.checked }, "AI 后处理");
+      } catch (error) {
+        elements.postProcessToggle.checked = state.settings.aiPostProcessEnabled;
+        setFeedback(error.message || "AI 后处理保存失败");
+      }
+    });
+  }
+
+  if (elements.scenarioSelect) {
+    elements.scenarioSelect.addEventListener("change", async () => {
+      try {
+        await saveSettings({ aiScenario: elements.scenarioSelect.value }, "场景");
+      } catch (error) {
+        elements.scenarioSelect.value = state.settings.aiScenario;
+        setFeedback(error.message || "场景保存失败");
+      }
+    });
+  }
 }
 
 function initEnvironmentNote() {
@@ -909,6 +1159,7 @@ setIdleView();
 updateStatsView();
 renderHistory();
 loadHotWords();
+loadSettings().then(loadMicrophones);
 
 if (window.voiceAssistantDesktop?.onRecorderEvent) {
   window.voiceAssistantDesktop.onRecorderEvent(handleRecognizerEvent);

@@ -50,7 +50,7 @@
             <div>
               <h1 id="home-title">自然说话，快速输入</h1>
               <p class="hero-copy">
-                按 <kbd>Ctrl</kbd><span>+</span><kbd>Shift</kbd><span>+</span><kbd>Space</kbd>
+                按 <kbd id="shortcutHint">Ctrl + Space</kbd>
                 开始或停止语音输入。
               </p>
               <p class="subcopy" id="environmentNote"></p>
@@ -235,12 +235,64 @@
               <div class="section-heading">
                 <div>
                   <h2>快捷键</h2>
-                  <p>当前默认组合键。</p>
+                  <p>设置全局唤起键，保存后立即生效。</p>
                 </div>
               </div>
-              <div class="setting-line">
-                <span>开始/停止语音输入</span>
-                <strong>Ctrl + Shift + Space</strong>
+              <div class="setting-stack">
+                <label class="field-label" for="shortcutInput">开始/停止语音输入</label>
+                <div class="inline-field">
+                  <input class="text-input" id="shortcutInput" type="text" spellcheck="false" placeholder="CommandOrControl+Space" />
+                  <button class="ghost-button" id="saveShortcutButton" type="button">
+                    <i data-lucide="save"></i>
+                    保存
+                  </button>
+                </div>
+                <p class="field-help" id="shortcutStatus">建议使用 CommandOrControl+Space 或 CommandOrControl+Shift+Space，避免和常用软件冲突。</p>
+              </div>
+            </article>
+
+            <article class="soft-card">
+              <div class="section-heading">
+                <div>
+                  <h2>麦克风</h2>
+                  <p>选择桌面端系统采集设备。</p>
+                </div>
+              </div>
+              <div class="setting-stack">
+                <label class="field-label" for="microphoneSelect">输入设备</label>
+                <div class="inline-field">
+                  <select class="select-input" id="microphoneSelect">
+                    <option value="">系统默认麦克风</option>
+                  </select>
+                  <button class="ghost-button" id="refreshMicrophonesButton" type="button">
+                    <i data-lucide="refresh-cw"></i>
+                    刷新
+                  </button>
+                </div>
+                <p class="field-help" id="microphoneStatus">使用系统默认输入设备。</p>
+              </div>
+            </article>
+
+            <article class="soft-card">
+              <div class="section-heading">
+                <div>
+                  <h2>AI 后处理</h2>
+                  <p>去重复、加标点、保守纠错、去语气助词。</p>
+                </div>
+                <label class="switch">
+                  <input id="postProcessToggle" type="checkbox" />
+                  <span></span>
+                </label>
+              </div>
+              <div class="setting-stack">
+                <label class="field-label" for="scenarioSelect">场景人设</label>
+                <select class="select-input" id="scenarioSelect">
+                  <option value="general">通用</option>
+                  <option value="office">办公</option>
+                  <option value="tech">技术</option>
+                  <option value="email">邮件</option>
+                </select>
+                <p class="field-help" id="scenarioHelp">保守整理口语文本，不添加新事实。</p>
               </div>
             </article>
 

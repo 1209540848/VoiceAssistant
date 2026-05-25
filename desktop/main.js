@@ -2,10 +2,11 @@ const { app, BrowserWindow, Menu, Tray, clipboard, globalShortcut, ipcMain, nati
 const { spawn } = require("child_process");
 const WebSocket = require("ws");
 const path = require("path");
+const fs = require("fs");
 
 const APP_URL = process.env.VOICE_ASSISTANT_URL || "http://127.0.0.1:4173/web/index.html";
 const FLOATING_URL = process.env.VOICE_ASSISTANT_FLOATING_URL || "http://127.0.0.1:4173/web/floating.html";
-const GLOBAL_SHORTCUT = process.env.VOICE_ASSISTANT_SHORTCUT || "CommandOrControl+Space";
+const DEFAULT_SHORTCUT = process.env.VOICE_ASSISTANT_SHORTCUT || "CommandOrControl+Space";
 const ASR_STREAM_URL = process.env.VOICE_ASSISTANT_ASR_STREAM_URL || "ws://127.0.0.1:4173/api/asr-stream";
 const SERVER_HEALTH_URL = process.env.VOICE_ASSISTANT_HEALTH_URL || "http://127.0.0.1:4173/api/health";
 const PREBUFFER_LIMIT_BYTES = 32000 * 2;
@@ -13,6 +14,16 @@ const TAIL_BUFFER_MS = 500;
 const MAIN_WINDOW_WIDTH = 1180;
 const MAIN_WINDOW_DEFAULT_HEIGHT = 640;
 const MAIN_WINDOW_MIN_HEIGHT = 640;
+const DATA_DIR = path.join(__dirname, "..", "data");
+const SETTINGS_FILE_PATH = path.join(DATA_DIR, "user-settings.json");
+
+const DEFAULT_SETTINGS = {
+  shortcut: DEFAULT_SHORTCUT,
+  microphoneDeviceId: "",
+  microphoneDeviceName: "",
+  aiPostProcessEnabled: false,
+  aiScenario: "general"
+};
 
 let mainWindow = null;
 let floatingWindow = null;
@@ -25,10 +36,44 @@ let desktopStreamPending = [];
 let preBufferBytes = 0;
 let stopTimer = null;
 let isDesktopRecording = false;
+let userSettings = loadUserSettings();
+let activeShortcut = "";
 const singleInstanceLock = app.requestSingleInstanceLock();
 
 if (!singleInstanceLock) {
   app.quit();
+}
+
+function normalizeSettings(input = {}) {
+  const shortcut = String(input.shortcut || DEFAULT_SETTINGS.shortcut).trim() || DEFAULT_SETTINGS.shortcut;
+  const scenario = ["general", "office", "tech", "email"].includes(input.aiScenario)
+    ? input.aiScenario
+    : DEFAULT_SETTINGS.aiScenario;
+  return {
+    ...DEFAULT_SETTINGS,
+    ...input,
+    shortcut,
+    microphoneDeviceId: String(input.microphoneDeviceId ?? DEFAULT_SETTINGS.microphoneDeviceId),
+    microphoneDeviceName: String(input.microphoneDeviceName || ""),
+    aiPostProcessEnabled: Boolean(input.aiPostProcessEnabled),
+    aiScenario: scenario
+  };
+}
+
+function loadUserSettings() {
+  try {
+    if (!fs.existsSync(SETTINGS_FILE_PATH)) return { ...DEFAULT_SETTINGS };
+    return normalizeSettings(JSON.parse(fs.readFileSync(SETTINGS_FILE_PATH, "utf8")));
+  } catch {
+    return { ...DEFAULT_SETTINGS };
+  }
+}
+
+function saveUserSettings(nextSettings) {
+  userSettings = normalizeSettings(nextSettings);
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(SETTINGS_FILE_PATH, JSON.stringify(userSettings, null, 2), "utf8");
+  return userSettings;
 }
 
 function createTrayIcon() {
@@ -180,7 +225,8 @@ function createTray() {
 }
 
 function registerShortcuts() {
-  const shortcuts = [GLOBAL_SHORTCUT, "CommandOrControl+Shift+Space"].filter(
+  globalShortcut.unregisterAll();
+  const shortcuts = [userSettings.shortcut, DEFAULT_SHORTCUT, "CommandOrControl+Shift+Space"].filter(
     (shortcut, index, list) => shortcut && list.indexOf(shortcut) === index
   );
   const handler = () => {
@@ -196,10 +242,38 @@ function registerShortcuts() {
     const registered = globalShortcut.register(shortcut, handler);
     if (registered) {
       console.log(`Global shortcut registered: ${shortcut}`);
-      return;
+      activeShortcut = shortcut;
+      return shortcut;
     }
     console.warn(`Global shortcut registration failed: ${shortcut}`);
   }
+  activeShortcut = "";
+  return "";
+}
+
+function validateShortcut(shortcut) {
+  const normalized = String(shortcut || "").trim();
+  if (!normalized) {
+    return {
+      ok: false,
+      message: "快捷键不能为空"
+    };
+  }
+  const parts = normalized.split("+").map((part) => part.trim()).filter(Boolean);
+  const key = parts[parts.length - 1];
+  const hasModifier = parts.slice(0, -1).some((part) =>
+    /^(CommandOrControl|Control|Ctrl|Command|Cmd|Alt|Option|Shift|Super|Meta)$/i.test(part)
+  );
+  if (!key || !hasModifier) {
+    return {
+      ok: false,
+      message: "快捷键至少需要一个修饰键，例如 CommandOrControl+Space"
+    };
+  }
+  return {
+    ok: true,
+    shortcut: normalized
+  };
 }
 
 function sendToRenderer(channel, payload = {}) {
@@ -363,9 +437,14 @@ async function warmLocalService() {
 
 function startWindowsCapture() {
   const scriptPath = path.join(__dirname, "windows-mic-capture.ps1");
+  const args = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath];
+  const deviceId = String(userSettings.microphoneDeviceId || "").trim();
+  if (deviceId) {
+    args.push("--device", deviceId);
+  }
   captureProcess = spawn(
     "powershell.exe",
-    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath],
+    args,
     {
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"]
@@ -432,8 +511,40 @@ async function startDesktopRecording() {
     mode: "desktop",
     sampleRate: 16000,
     format: "pcm_s16le",
-    channels: 1
+    channels: 1,
+    microphoneDeviceId: userSettings.microphoneDeviceId,
+    microphoneDeviceName: userSettings.microphoneDeviceName
   };
+}
+
+function listWindowsMicrophones() {
+  return new Promise((resolve) => {
+    if (process.platform !== "win32") {
+      resolve([]);
+      return;
+    }
+    const scriptPath = path.join(__dirname, "windows-mic-capture.ps1");
+    const child = spawn(
+      "powershell.exe",
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath, "--list-devices"],
+      {
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"]
+      }
+    );
+    let stdout = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString("utf8");
+    });
+    child.on("close", () => {
+      try {
+        resolve(JSON.parse(stdout || "[]"));
+      } catch {
+        resolve([]);
+      }
+    });
+    child.on("error", () => resolve([]));
+  });
 }
 
 ipcMain.handle("desktop-recorder:start", async () => {
@@ -451,6 +562,61 @@ ipcMain.handle("desktop-clipboard:write-text", async (_event, text) => {
   clipboard.writeText(String(text || ""));
   return {
     ok: true
+  };
+});
+
+ipcMain.handle("desktop-settings:get", async () => {
+  return {
+    ok: true,
+    settings: {
+      ...userSettings,
+      activeShortcut
+    }
+  };
+});
+
+ipcMain.handle("desktop-settings:update", async (_event, patch = {}) => {
+  const nextSettings = {
+    ...userSettings,
+    ...patch
+  };
+
+  if (Object.prototype.hasOwnProperty.call(patch, "shortcut")) {
+    const validation = validateShortcut(patch.shortcut);
+    if (!validation.ok) {
+      return {
+        ok: false,
+        message: validation.message
+      };
+    }
+    nextSettings.shortcut = validation.shortcut;
+  }
+
+  const previousSettings = userSettings;
+  saveUserSettings(nextSettings);
+  const registeredShortcut = registerShortcuts();
+  if (Object.prototype.hasOwnProperty.call(patch, "shortcut") && registeredShortcut !== userSettings.shortcut) {
+    saveUserSettings(previousSettings);
+    registerShortcuts();
+    return {
+      ok: false,
+      message: "快捷键注册失败，可能已被其他应用占用"
+    };
+  }
+  return {
+    ok: true,
+    settings: {
+      ...userSettings,
+      activeShortcut
+    }
+  };
+});
+
+ipcMain.handle("desktop-audio:list-inputs", async () => {
+  const devices = await listWindowsMicrophones();
+  return {
+    ok: true,
+    devices
   };
 });
 

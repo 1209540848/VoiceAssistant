@@ -9,6 +9,7 @@ const rootDir = __dirname;
 const webDir = path.join(rootDir, "web");
 const dataDir = path.join(rootDir, "data");
 const hotWordsFilePath = path.join(dataDir, "user-hotwords.json");
+const settingsFilePath = path.join(dataDir, "user-settings.json");
 
 loadLocalEnv(path.join(rootDir, ".env.local"));
 
@@ -27,8 +28,40 @@ const dashscopeHttpBaseUrl =
 const dashscopeHotWordsTargetModel =
   process.env.DASHSCOPE_HOT_WORDS_TARGET_MODEL ||
   (dashscopeModel.startsWith("fun-asr") ? "fun-asr" : dashscopeModel);
+const dashscopeTextModel = process.env.DASHSCOPE_TEXT_MODEL || "qwen-plus";
+const dashscopeOpenAiBaseUrl =
+  process.env.DASHSCOPE_OPENAI_BASE_URL ||
+  "https://dashscope.aliyuncs.com/compatible-mode/v1";
+
+const DEFAULT_USER_SETTINGS = {
+  shortcut: process.env.VOICE_ASSISTANT_SHORTCUT || "CommandOrControl+Space",
+  microphoneDeviceId: "",
+  microphoneDeviceName: "",
+  aiPostProcessEnabled: false,
+  aiScenario: "general"
+};
+
+const AI_SCENARIOS = {
+  general: {
+    label: "通用",
+    instruction: "适合日常输入。保留用户原意，只做轻量纠错、标点、去重复和去除明显语气助词。"
+  },
+  office: {
+    label: "办公",
+    instruction: "适合工作沟通。表达清晰、克制、可直接发给同事，不增加没有说出的结论。"
+  },
+  tech: {
+    label: "技术",
+    instruction: "适合技术讨论。保留技术名词、中英文缩写、命令和产品名，不随意翻译或改写专有词。"
+  },
+  email: {
+    label: "邮件",
+    instruction: "适合邮件和正式留言。语气礼貌、结构自然，但不要扩写事实，不要替用户添加承诺。"
+  }
+};
 
 let hotWordsState = loadHotWordsState();
+let userSettings = loadUserSettings();
 
 function createTraceId(prefix = "asr") {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -115,6 +148,35 @@ function normalizeHotWords(words) {
     normalized.push(text);
   }
   return normalized.slice(0, 200);
+}
+
+function normalizeUserSettings(input = {}) {
+  const scenario = AI_SCENARIOS[input.aiScenario] ? input.aiScenario : DEFAULT_USER_SETTINGS.aiScenario;
+  return {
+    ...DEFAULT_USER_SETTINGS,
+    ...input,
+    shortcut: String(input.shortcut || DEFAULT_USER_SETTINGS.shortcut),
+    microphoneDeviceId: String(input.microphoneDeviceId || ""),
+    microphoneDeviceName: String(input.microphoneDeviceName || ""),
+    aiPostProcessEnabled: Boolean(input.aiPostProcessEnabled),
+    aiScenario: scenario
+  };
+}
+
+function loadUserSettings() {
+  try {
+    if (!fs.existsSync(settingsFilePath)) return { ...DEFAULT_USER_SETTINGS };
+    return normalizeUserSettings(JSON.parse(fs.readFileSync(settingsFilePath, "utf8")));
+  } catch {
+    return { ...DEFAULT_USER_SETTINGS };
+  }
+}
+
+function saveUserSettings(nextSettings) {
+  userSettings = normalizeUserSettings(nextSettings);
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.writeFileSync(settingsFilePath, JSON.stringify(userSettings, null, 2), "utf8");
+  return userSettings;
 }
 
 function loadHotWordsState() {
@@ -263,6 +325,129 @@ function createSentenceBuffer() {
       return finalText || this.current || fallback || "";
     }
   };
+}
+
+function cleanTranscriptLocally(text) {
+  let output = String(text || "").trim();
+  if (!output) return "";
+
+  output = output
+    .replace(/\s+/g, " ")
+    .replace(/([，。！？、,.!?])\1+/g, "$1")
+    .replace(/(?:^|[，。！？\s])(嗯+|呃+|额+|啊+|呀+|就是|那个|然后)(?=[，。！？\s]|$)/g, "")
+    .replace(/(.{2,40})\1{2,}/g, "$1")
+    .replace(/(.{4,80})\1+/g, "$1")
+    .replace(/\s+([，。！？,.!?])/g, "$1")
+    .replace(/([，。！？])\s+/g, "$1")
+    .trim();
+
+  if (output && !/[。！？!?]$/.test(output)) {
+    output += "。";
+  }
+  return output;
+}
+
+function buildPostProcessPrompt(text, scenarioKey) {
+  const scenario = AI_SCENARIOS[scenarioKey] || AI_SCENARIOS.general;
+  return [
+    {
+      role: "system",
+      content: [
+        "你是语音输入文本后处理器，只输出处理后的中文文本。",
+        "必须保守处理，不能新增事实，不能改变用户立场，不能扩写用户没有说出的内容。",
+        "任务：去除明显重复、添加必要标点、修正常见识别错字、去掉语气助词和口头禅。",
+        "如果原文已经清楚，就尽量少改。",
+        "不要输出解释、不要输出“请提供文本”、不要输出任何客服式提示。",
+        "如果输入内容不可理解，原样返回输入文本。",
+        "保留专有名词、英文缩写、代码名、产品名和数字。",
+        `场景：${scenario.label}。${scenario.instruction}`
+      ].join("\n")
+    },
+    {
+      role: "user",
+      content: `请处理下面的语音转写文本，只返回最终可使用文本：\n${text}`
+    }
+  ];
+}
+
+function isBadPostProcessOutput(output) {
+  return /请提供|无法处理|没有提供|作为|我可以|以下是|处理后的文本/i.test(String(output || ""));
+}
+
+async function postProcessText(text, options = {}) {
+  const originalText = String(text || "").trim();
+  const localText = cleanTranscriptLocally(originalText);
+  const scenario = AI_SCENARIOS[options.scenario] ? options.scenario : userSettings.aiScenario;
+
+  if (!originalText) {
+    return {
+      text: "",
+      originalText,
+      changed: false,
+      mode: "empty",
+      scenario
+    };
+  }
+
+  if (!options.enabled) {
+    return {
+      text: originalText,
+      originalText,
+      changed: false,
+      mode: "disabled",
+      scenario
+    };
+  }
+
+  if (!dashscopeApiKey) {
+    return {
+      text: localText || originalText,
+      originalText,
+      changed: (localText || originalText) !== originalText,
+      mode: "local",
+      scenario,
+      warning: "DASHSCOPE_API_KEY is not configured"
+    };
+  }
+
+  try {
+    const response = await fetch(`${dashscopeOpenAiBaseUrl.replace(/\/$/, "")}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${dashscopeApiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: dashscopeTextModel,
+        messages: buildPostProcessPrompt(localText || originalText, scenario),
+        temperature: 0.1,
+        max_tokens: 800
+      })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.message || data.error?.message || `DashScope text request failed: ${response.status}`);
+    }
+    const output = String(data.choices?.[0]?.message?.content || "").trim();
+    const finalText = output && !isBadPostProcessOutput(output) ? output : (localText || originalText);
+    return {
+      text: finalText,
+      originalText,
+      changed: finalText !== originalText,
+      mode: "dashscope",
+      scenario,
+      model: dashscopeTextModel
+    };
+  } catch (error) {
+    return {
+      text: localText || originalText,
+      originalText,
+      changed: (localText || originalText) !== originalText,
+      mode: "local",
+      scenario,
+      warning: error.message
+    };
+  }
 }
 
 async function transcribeWithDashScope(audioBuffer, options = {}) {
@@ -559,6 +744,53 @@ async function handleTranscribe(req, res) {
   });
 }
 
+async function handlePostProcess(req, res) {
+  try {
+    const raw = await readRequestBody(req);
+    const body = raw ? JSON.parse(raw) : {};
+    const result = await postProcessText(body.text, {
+      enabled: Boolean(body.enabled),
+      scenario: body.scenario || userSettings.aiScenario
+    });
+    sendJson(res, 200, result);
+  } catch (error) {
+    sendJson(res, 400, {
+      error: "post_process_failed",
+      message: error.message
+    });
+  }
+}
+
+function sendSettings(res) {
+  sendJson(res, 200, {
+    settings: userSettings,
+    scenarios: Object.entries(AI_SCENARIOS).map(([id, item]) => ({
+      id,
+      label: item.label,
+      description: item.instruction
+    }))
+  });
+}
+
+async function handleSaveSettings(req, res) {
+  try {
+    const raw = await readRequestBody(req);
+    const body = raw ? JSON.parse(raw) : {};
+    const nextState = saveUserSettings({
+      ...userSettings,
+      ...body
+    });
+    sendJson(res, 200, {
+      settings: nextState
+    });
+  } catch (error) {
+    sendJson(res, 400, {
+      error: "settings_save_failed",
+      message: error.message
+    });
+  }
+}
+
 function sendHotWords(res) {
   sendJson(res, 200, {
     words: hotWordsState.words,
@@ -727,6 +959,21 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (pathname === "/api/post-process" && req.method === "POST") {
+    await handlePostProcess(req, res);
+    return;
+  }
+
+  if (pathname === "/api/settings" && req.method === "GET") {
+    sendSettings(res);
+    return;
+  }
+
+  if (pathname === "/api/settings" && req.method === "POST") {
+    await handleSaveSettings(req, res);
+    return;
+  }
+
   if (pathname === "/api/hot-words" && req.method === "GET") {
     sendHotWords(res);
     return;
@@ -754,7 +1001,10 @@ const server = http.createServer(async (req, res) => {
         count: hotWordsState.words.length
       },
       model: dashscopeModel,
-      baseUrl: dashscopeBaseUrl
+      baseUrl: dashscopeBaseUrl,
+      textModel: dashscopeTextModel,
+      postProcessEnabled: userSettings.aiPostProcessEnabled,
+      aiScenario: userSettings.aiScenario
     });
     return;
   }

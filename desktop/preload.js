@@ -6,6 +6,9 @@ contextBridge.exposeInMainWorld("voiceAssistantDesktop", {
   startRecording: () => ipcRenderer.invoke("desktop-recorder:start"),
   stopRecording: () => ipcRenderer.invoke("desktop-recorder:stop"),
   writeClipboardText: (text) => ipcRenderer.invoke("desktop-clipboard:write-text", text),
+  getSettings: () => ipcRenderer.invoke("desktop-settings:get"),
+  updateSettings: (patch) => ipcRenderer.invoke("desktop-settings:update", patch),
+  listInputDevices: () => ipcRenderer.invoke("desktop-audio:list-inputs"),
   onRecorderEvent: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on("desktop-recorder:event", listener);
