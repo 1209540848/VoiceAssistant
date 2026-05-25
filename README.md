@@ -8,5 +8,11 @@
 - 本地服务入口：[server.js](server.js)
 - 当前工作台：[web/index.html](web/index.html)
 
+本地配置：
+
+1. 复制 `.env.example` 为 `.env.local`。
+2. 填入 `DASHSCOPE_API_KEY`。
+3. ASR 热词优先在应用内“我的热词”面板维护。高级兜底配置见：[docs/hot-words.md](docs/hot-words.md)。
+
 启动服务：`npm start`
 打开地址：`http://127.0.0.1:4173/web/index.html`

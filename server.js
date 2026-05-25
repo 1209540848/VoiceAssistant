@@ -7,6 +7,8 @@ const { WebSocketServer } = WebSocket;
 
 const rootDir = __dirname;
 const webDir = path.join(rootDir, "web");
+const dataDir = path.join(rootDir, "data");
+const hotWordsFilePath = path.join(dataDir, "user-hotwords.json");
 
 loadLocalEnv(path.join(rootDir, ".env.local"));
 
@@ -18,6 +20,15 @@ const dashscopeBaseUrl =
 const dashscopeModel = process.env.DASHSCOPE_MODEL || "fun-asr-realtime";
 const dashscopeLanguage = process.env.DASHSCOPE_LANGUAGE || "zh";
 const dashscopeSampleRate = Number(process.env.DASHSCOPE_SAMPLE_RATE || 16000);
+const fallbackVocabularyId = process.env.DASHSCOPE_VOCABULARY_ID || "";
+const dashscopeHttpBaseUrl =
+  process.env.DASHSCOPE_HTTP_BASE_URL ||
+  "https://dashscope.aliyuncs.com";
+const dashscopeHotWordsTargetModel =
+  process.env.DASHSCOPE_HOT_WORDS_TARGET_MODEL ||
+  (dashscopeModel.startsWith("fun-asr") ? "fun-asr" : dashscopeModel);
+
+let hotWordsState = loadHotWordsState();
 
 function createTraceId(prefix = "asr") {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -78,6 +89,77 @@ function sendText(res, statusCode, body, contentType = "text/plain; charset=utf-
   res.end(body);
 }
 
+async function readRequestBody(req, maxBytes = 1024 * 1024) {
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of req) {
+    const current = Buffer.from(chunk);
+    total += current.length;
+    if (total > maxBytes) {
+      const error = new Error("Request body too large");
+      error.code = "body_too_large";
+      throw error;
+    }
+    chunks.push(current);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+function normalizeHotWords(words) {
+  const seen = new Set();
+  const normalized = [];
+  for (const item of Array.isArray(words) ? words : []) {
+    const text = String(item || "").trim();
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    normalized.push(text);
+  }
+  return normalized.slice(0, 200);
+}
+
+function loadHotWordsState() {
+  try {
+    if (!fs.existsSync(hotWordsFilePath)) {
+      return {
+        words: [],
+        vocabularyId: "",
+        dirty: false,
+        updatedAt: ""
+      };
+    }
+    const parsed = JSON.parse(fs.readFileSync(hotWordsFilePath, "utf8"));
+    return {
+      words: normalizeHotWords(parsed.words),
+      vocabularyId: String(parsed.vocabularyId || ""),
+      dirty: Boolean(parsed.dirty),
+      updatedAt: String(parsed.updatedAt || "")
+    };
+  } catch {
+    return {
+      words: [],
+      vocabularyId: "",
+      dirty: false,
+      updatedAt: ""
+    };
+  }
+}
+
+function saveHotWordsState(nextState) {
+  hotWordsState = {
+    words: normalizeHotWords(nextState.words),
+    vocabularyId: String(nextState.vocabularyId || ""),
+    dirty: Boolean(nextState.dirty),
+    updatedAt: nextState.updatedAt || new Date().toISOString()
+  };
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.writeFileSync(hotWordsFilePath, JSON.stringify(hotWordsState, null, 2), "utf8");
+  return hotWordsState;
+}
+
+function getActiveVocabularyId() {
+  return hotWordsState.vocabularyId || fallbackVocabularyId;
+}
+
 function getMimeType(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   const map = {
@@ -108,6 +190,17 @@ function resolveStaticFile(requestPath) {
 }
 
 function createRunTaskMessage(taskId) {
+  const vocabularyId = getActiveVocabularyId();
+  const parameters = {
+    format: "pcm",
+    sample_rate: dashscopeSampleRate,
+    language: dashscopeLanguage
+  };
+
+  if (vocabularyId) {
+    parameters.vocabulary_id = vocabularyId;
+  }
+
   return {
     header: {
       action: "run-task",
@@ -119,11 +212,7 @@ function createRunTaskMessage(taskId) {
       task: "asr",
       function: "recognition",
       model: dashscopeModel,
-      parameters: {
-        format: "pcm",
-        sample_rate: dashscopeSampleRate,
-        language: dashscopeLanguage
-      },
+      parameters,
       input: {}
     }
   };
@@ -470,6 +559,155 @@ async function handleTranscribe(req, res) {
   });
 }
 
+function sendHotWords(res) {
+  sendJson(res, 200, {
+    words: hotWordsState.words,
+    vocabularyId: hotWordsState.vocabularyId,
+    fallbackVocabularyId,
+    activeVocabularyId: getActiveVocabularyId(),
+    dirty: hotWordsState.dirty,
+    updatedAt: hotWordsState.updatedAt
+  });
+}
+
+async function handleSaveHotWords(req, res) {
+  try {
+    const raw = await readRequestBody(req);
+    const body = raw ? JSON.parse(raw) : {};
+    const words = normalizeHotWords(body.words);
+    const wordsChanged = JSON.stringify(words) !== JSON.stringify(hotWordsState.words);
+    const nextState = saveHotWordsState({
+      ...hotWordsState,
+      words,
+      dirty: wordsChanged ? true : hotWordsState.dirty
+    });
+    sendJson(res, 200, {
+      words: nextState.words,
+      vocabularyId: nextState.vocabularyId,
+      activeVocabularyId: getActiveVocabularyId(),
+      dirty: nextState.dirty,
+      updatedAt: nextState.updatedAt
+    });
+  } catch (error) {
+    sendJson(res, error.code === "body_too_large" ? 413 : 400, {
+      error: "hot_words_save_failed",
+      message: error.message
+    });
+  }
+}
+
+async function requestDashScopeVocabulary(action, payload) {
+  const response = await fetch(`${dashscopeHttpBaseUrl.replace(/\/$/, "")}/api/v1/services/audio/asr/customization`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${dashscopeApiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: "speech-biasing",
+      input: {
+        action,
+        ...payload
+      }
+    })
+  });
+
+  const text = await response.text();
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { raw: text };
+  }
+
+  if (!response.ok || data.code) {
+    const error = new Error(data.message || data.Message || `DashScope hot words request failed: ${response.status}`);
+    error.statusCode = response.status;
+    error.details = data;
+    throw error;
+  }
+
+  return data;
+}
+
+function extractVocabularyId(response) {
+  return (
+    response?.output?.vocabulary_id ||
+    response?.output?.vocabularyId ||
+    response?.vocabulary_id ||
+    response?.vocabularyId ||
+    ""
+  );
+}
+
+async function syncHotWordsWithDashScope(words, vocabularyId = "") {
+  const action = vocabularyId ? "update_vocabulary" : "create_vocabulary";
+  const payload = {
+    prefix: "voice-assistant",
+    target_model: dashscopeHotWordsTargetModel,
+    vocabulary: words.map((text) => ({
+      text,
+      weight: 4,
+      lang: dashscopeLanguage
+    }))
+  };
+
+  if (vocabularyId) {
+    payload.vocabulary_id = vocabularyId;
+  }
+
+  const response = await requestDashScopeVocabulary(action, payload);
+  return extractVocabularyId(response) || vocabularyId;
+}
+
+async function handleSyncHotWords(_req, res) {
+  if (!dashscopeApiKey) {
+    sendJson(res, 500, {
+      error: "dashscope_api_key_missing",
+      message: "DASHSCOPE_API_KEY is not configured"
+    });
+    return;
+  }
+
+  if (!hotWordsState.words.length) {
+    const nextState = saveHotWordsState({
+      words: [],
+      vocabularyId: "",
+      dirty: false
+    });
+    sendJson(res, 200, {
+      words: nextState.words,
+      vocabularyId: "",
+      activeVocabularyId: fallbackVocabularyId,
+      dirty: false,
+      updatedAt: nextState.updatedAt
+    });
+    return;
+  }
+
+  try {
+    const vocabularyId = await syncHotWordsWithDashScope(hotWordsState.words, hotWordsState.vocabularyId);
+    const nextState = saveHotWordsState({
+      words: hotWordsState.words,
+      vocabularyId,
+      dirty: false
+    });
+    sendJson(res, 200, {
+      words: nextState.words,
+      vocabularyId: nextState.vocabularyId,
+      activeVocabularyId: getActiveVocabularyId(),
+      dirty: false,
+      updatedAt: nextState.updatedAt
+    });
+  } catch (error) {
+    sendJson(res, error.statusCode || 502, {
+      error: "hot_words_sync_failed",
+      message: error.message,
+      details: error.details || null
+    });
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   const parsedUrl = url.parse(req.url || "/", true);
   const pathname = parsedUrl.pathname || "/";
@@ -489,10 +727,32 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (pathname === "/api/hot-words" && req.method === "GET") {
+    sendHotWords(res);
+    return;
+  }
+
+  if (pathname === "/api/hot-words" && req.method === "POST") {
+    await handleSaveHotWords(req, res);
+    return;
+  }
+
+  if (pathname === "/api/hot-words/sync" && req.method === "POST") {
+    await handleSyncHotWords(req, res);
+    return;
+  }
+
   if (pathname === "/api/health") {
     sendJson(res, 200, {
       ok: true,
       dashscopeConfigured: Boolean(dashscopeApiKey),
+      hotWords: {
+        activeVocabularyId: getActiveVocabularyId(),
+        userVocabularyId: hotWordsState.vocabularyId,
+        fallbackVocabularyId,
+        dirty: hotWordsState.dirty,
+        count: hotWordsState.words.length
+      },
       model: dashscopeModel,
       baseUrl: dashscopeBaseUrl
     });
@@ -773,4 +1033,5 @@ asrStreamServer.on("connection", (clientWs, request) => {
 server.listen(port, () => {
   console.log(`VoiceAssistant server running at http://127.0.0.1:${port}`);
   console.log(`DashScope ASR: ${dashscopeApiKey ? "enabled" : "disabled"}`);
+  console.log(`DashScope hot words: ${getActiveVocabularyId() ? getActiveVocabularyId() : "disabled"}`);
 });

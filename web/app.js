@@ -20,6 +20,12 @@ const state = {
   streamLiveText: "",
   streamFinalText: "",
   streamLastError: "",
+  history: [],
+  stats: {
+    date: new Date().toISOString().slice(0, 10),
+    todayChars: 0,
+    todaySeconds: 0
+  },
   captureMode: window.voiceAssistantDesktop ? "desktop" : "browser"
 };
 
@@ -44,11 +50,258 @@ const elements = {
   feedback: document.querySelector("#feedback"),
   environmentNote: document.querySelector("#environmentNote"),
   controlHint: document.querySelector("#controlHint"),
-  sourceBadge: document.querySelector("#sourceBadge")
+  sourceBadge: document.querySelector("#sourceBadge"),
+  navItems: document.querySelectorAll("[data-page-target]"),
+  pageViews: document.querySelectorAll("[data-page]"),
+  todayChars: document.querySelector("#todayChars"),
+  todayMinutes: document.querySelector("#todayMinutes"),
+  averageSpeed: document.querySelector("#averageSpeed"),
+  hotWordsMetric: document.querySelector("#hotWordsMetric"),
+  historyList: document.querySelector("#historyList"),
+  historyCount: document.querySelector("#historyCount"),
+  hotWordsInput: document.querySelector("#hotWordsInput"),
+  hotWordsStatus: document.querySelector("#hotWordsStatus"),
+  hotWordsCount: document.querySelector("#hotWordsCount"),
+  hotWordsPreview: document.querySelector("#hotWordsPreview"),
+  saveHotWordsButton: document.querySelector("#saveHotWordsButton"),
+  syncHotWordsButton: document.querySelector("#syncHotWordsButton"),
+  clearHotWordsButton: document.querySelector("#clearHotWordsButton")
 };
 
 const ASR_STREAM_ENDPOINT = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/api/asr-stream`;
 const isFloatingView = Boolean(document.querySelector("#floatingShell"));
+const HISTORY_STORAGE_KEY = "voiceAssistant.history.v1";
+const STATS_STORAGE_KEY = "voiceAssistant.stats.v1";
+
+function switchPage(pageName) {
+  elements.pageViews.forEach((view) => {
+    view.classList.toggle("is-active", view.dataset.page === pageName);
+  });
+  elements.navItems.forEach((item) => {
+    item.classList.toggle("is-active", item.dataset.pageTarget === pageName);
+  });
+}
+
+function loadLocalState() {
+  try {
+    state.history = JSON.parse(localStorage.getItem(HISTORY_STORAGE_KEY) || "[]");
+  } catch {
+    state.history = [];
+  }
+  try {
+    state.stats = {
+      ...state.stats,
+      ...JSON.parse(localStorage.getItem(STATS_STORAGE_KEY) || "{}")
+    };
+  } catch {}
+  const today = new Date().toISOString().slice(0, 10);
+  if (state.stats.date !== today) {
+    state.stats = {
+      date: today,
+      todayChars: 0,
+      todaySeconds: 0
+    };
+  }
+}
+
+function persistLocalState() {
+  localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(state.history.slice(0, 20)));
+  localStorage.setItem(STATS_STORAGE_KEY, JSON.stringify(state.stats));
+}
+
+function updateStatsView() {
+  if (elements.todayChars) {
+    elements.todayChars.textContent = `${state.stats.todayChars || 0} 字`;
+  }
+  if (elements.todayMinutes) {
+    elements.todayMinutes.textContent = `${Math.round((state.stats.todaySeconds || 0) / 60)} min`;
+  }
+  if (elements.averageSpeed) {
+    const minutes = Math.max((state.stats.todaySeconds || 0) / 60, 1);
+    elements.averageSpeed.textContent = `${Math.round((state.stats.todayChars || 0) / minutes)} 字/分`;
+  }
+}
+
+function renderHistory() {
+  if (!elements.historyList) return;
+  if (elements.historyCount) {
+    elements.historyCount.textContent = `${state.history.length} 条`;
+  }
+
+  if (!state.history.length) {
+    elements.historyList.innerHTML = `
+      <div class="empty-state">
+        <i data-lucide="clock-3"></i>
+        <strong>还没有历史记录</strong>
+        <span>完成一次转写后，这里会出现最近输入。</span>
+      </div>
+    `;
+    if (window.lucide) window.lucide.createIcons();
+    return;
+  }
+
+  elements.historyList.innerHTML = state.history
+    .map((item) => `
+      <article class="history-item">
+        <header>
+          <span>${item.createdAt}</span>
+          <span>${item.text.length} 字</span>
+        </header>
+        <p>${escapeHtml(item.text)}</p>
+      </article>
+    `)
+    .join("");
+}
+
+function addHistoryEntry(text) {
+  const cleaned = String(text || "").trim();
+  if (!cleaned) return;
+  const last = state.history[0];
+  if (last?.text === cleaned) return;
+  state.history.unshift({
+    text: cleaned,
+    createdAt: new Date().toLocaleString("zh-CN", {
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit"
+    })
+  });
+  state.history = state.history.slice(0, 20);
+  state.stats.todayChars += cleaned.length;
+  state.stats.todaySeconds += Math.max(state.elapsedSeconds, 1);
+  persistLocalState();
+  updateStatsView();
+  renderHistory();
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function parseHotWordsInput() {
+  if (!elements.hotWordsInput) return [];
+  const seen = new Set();
+  return elements.hotWordsInput.value
+    .split(/\r?\n/)
+    .map((word) => word.trim())
+    .filter((word) => {
+      if (!word || seen.has(word)) return false;
+      seen.add(word);
+      return true;
+    });
+}
+
+function renderHotWordsStatus(data, fallbackLabel = "") {
+  if (!elements.hotWordsStatus) return;
+  if (!data) {
+    elements.hotWordsStatus.textContent = fallbackLabel || "未加载";
+    return;
+  }
+  const count = Array.isArray(data.words) ? data.words.length : 0;
+  updateHotWordsAuxiliary(data.words || parseHotWordsInput());
+  if (data.dirty) {
+    elements.hotWordsStatus.textContent = `${count} 个，未同步`;
+    return;
+  }
+  if (data.activeVocabularyId) {
+    elements.hotWordsStatus.textContent = `${count} 个，已同步`;
+    return;
+  }
+  elements.hotWordsStatus.textContent = count ? `${count} 个，待同步` : "未启用";
+}
+
+function updateHotWordsAuxiliary(words = parseHotWordsInput()) {
+  if (elements.hotWordsCount) {
+    elements.hotWordsCount.textContent = `${words.length}/300 热词`;
+  }
+  if (elements.hotWordsMetric) {
+    elements.hotWordsMetric.textContent = `${words.length} 个`;
+  }
+  if (!elements.hotWordsPreview) return;
+  if (!words.length) {
+    elements.hotWordsPreview.innerHTML = `
+      <div class="empty-state compact">
+        <i data-lucide="book-open"></i>
+        <strong>还没有任何热词</strong>
+        <span>我会记住你独特的名称和词汇。</span>
+      </div>
+    `;
+    if (window.lucide) window.lucide.createIcons();
+    return;
+  }
+  elements.hotWordsPreview.innerHTML = words
+    .map((word) => `<span class="word-chip">${escapeHtml(word)}</span>`)
+    .join("");
+}
+
+async function loadHotWords() {
+  if (!elements.hotWordsInput) return;
+  try {
+    const response = await fetch("/api/hot-words");
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || "热词加载失败");
+    elements.hotWordsInput.value = (data.words || []).join("\n");
+    renderHotWordsStatus(data);
+    updateHotWordsAuxiliary(data.words || []);
+  } catch (error) {
+    renderHotWordsStatus(null, "加载失败");
+    setFeedback(error.message || "热词加载失败");
+  }
+}
+
+async function saveHotWords() {
+  if (!elements.hotWordsInput) return false;
+  const words = parseHotWordsInput();
+  try {
+    const response = await fetch("/api/hot-words", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ words })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || "热词保存失败");
+    elements.hotWordsInput.value = (data.words || []).join("\n");
+    renderHotWordsStatus(data);
+    updateHotWordsAuxiliary(data.words || []);
+    setFeedback("热词已保存，未同步前不会影响识别。");
+    return true;
+  } catch (error) {
+    renderHotWordsStatus(null, "保存失败");
+    setFeedback(error.message || "热词保存失败");
+    return false;
+  }
+}
+
+async function syncHotWords() {
+  if (!elements.hotWordsInput) return;
+  const saved = await saveHotWords();
+  if (!saved) return;
+  elements.syncHotWordsButton.disabled = true;
+  renderHotWordsStatus(null, "同步中");
+  try {
+    const response = await fetch("/api/hot-words/sync", {
+      method: "POST"
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || "热词同步失败");
+    renderHotWordsStatus(data);
+    updateHotWordsAuxiliary(data.words || []);
+    setFeedback(data.activeVocabularyId ? "热词已同步，下一次录音生效。" : "热词已清空。");
+  } catch (error) {
+    renderHotWordsStatus(null, "同步失败");
+    setFeedback(error.message || "热词同步失败");
+  } finally {
+    elements.syncHotWordsButton.disabled = false;
+  }
+}
 
 function updateShellState(mode = "") {
   const shell = document.querySelector("#floatingShell");
@@ -156,6 +409,7 @@ function handleRecognizerEvent(payload) {
         .join(" | ")
     );
     updateDiagnostics();
+    addHistoryEntry(state.transcript);
     autoCopyFinalText(state.transcript).finally(() => {
       window.setTimeout(() => updateShellState(""), 650);
     });
@@ -604,6 +858,34 @@ function bindEvents() {
   });
 
   elements.clearButton.addEventListener("click", clearAll);
+
+  elements.navItems.forEach((item) => {
+    item.addEventListener("click", () => switchPage(item.dataset.pageTarget));
+  });
+
+  if (elements.saveHotWordsButton) {
+    elements.saveHotWordsButton.addEventListener("click", saveHotWords);
+  }
+
+  if (elements.syncHotWordsButton) {
+    elements.syncHotWordsButton.addEventListener("click", syncHotWords);
+  }
+
+  if (elements.hotWordsInput) {
+    elements.hotWordsInput.addEventListener("input", () => {
+      const count = parseHotWordsInput().length;
+      elements.hotWordsStatus.textContent = `${count} 个，未保存`;
+      updateHotWordsAuxiliary();
+    });
+  }
+
+  if (elements.clearHotWordsButton && elements.hotWordsInput) {
+    elements.clearHotWordsButton.addEventListener("click", () => {
+      elements.hotWordsInput.value = "";
+      elements.hotWordsStatus.textContent = "0 个，未保存";
+      updateHotWordsAuxiliary([]);
+    });
+  }
 }
 
 function initEnvironmentNote() {
@@ -620,9 +902,13 @@ function initEnvironmentNote() {
   }
 }
 
+loadLocalState();
 bindEvents();
 initEnvironmentNote();
 setIdleView();
+updateStatsView();
+renderHistory();
+loadHotWords();
 
 if (window.voiceAssistantDesktop?.onRecorderEvent) {
   window.voiceAssistantDesktop.onRecorderEvent(handleRecognizerEvent);

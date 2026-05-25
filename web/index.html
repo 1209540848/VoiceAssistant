@@ -7,95 +7,249 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <main class="app-shell">
-      <section class="workspace" aria-labelledby="page-title">
-        <header class="titlebar">
-          <div class="brand-block">
-            <p class="eyebrow">Desktop Voice Assistant</p>
-            <div class="brand-line">
-              <h1 id="page-title">Voice Assistant</h1>
-              <span class="app-tag">本地工作台</span>
-            </div>
-            <p class="subcopy" id="environmentNote"></p>
+    <main class="desktop-shell">
+      <aside class="sidebar" aria-label="主导航">
+        <div class="brand">
+          <div class="brand-mark">V</div>
+          <div>
+            <strong>Voice Assistant</strong>
+            <span>Desktop Input</span>
           </div>
+        </div>
 
-          <div class="status-stack">
+        <nav class="nav-list" aria-label="页面">
+          <button class="nav-item is-active" type="button" data-page-target="home">
+            <i data-lucide="home"></i>
+            首页
+          </button>
+          <button class="nav-item" type="button" data-page-target="history">
+            <i data-lucide="clock-3"></i>
+            历史记录
+          </button>
+          <button class="nav-item" type="button" data-page-target="dictionary">
+            <i data-lucide="book-open"></i>
+            词典
+          </button>
+        </nav>
+
+        <div class="sidebar-footer">
+          <button class="nav-item muted" type="button" data-page-target="settings">
+            <i data-lucide="settings"></i>
+            设置
+          </button>
+          <button class="nav-item muted" type="button" data-page-target="feedback">
+            <i data-lucide="message-square"></i>
+            反馈
+          </button>
+        </div>
+      </aside>
+
+      <section class="content-shell">
+        <section class="page-view is-active" data-page="home" aria-labelledby="home-title">
+          <header class="hero-header">
+            <div>
+              <h1 id="home-title">自然说话，快速输入</h1>
+              <p class="hero-copy">
+                按 <kbd>Ctrl</kbd><span>+</span><kbd>Shift</kbd><span>+</span><kbd>Space</kbd>
+                开始或停止语音输入。
+              </p>
+              <p class="subcopy" id="environmentNote"></p>
+            </div>
             <div class="status-pill" id="statusPill" aria-live="polite">
               <i data-lucide="circle-dot"></i>
               <span id="statusText">待输入</span>
             </div>
-            <div class="meta-row">
-              <span class="meta-chip" id="transcriptMeta">等待语音输入</span>
-              <span class="meta-chip" id="sessionMeta">未开始</span>
-            </div>
-          </div>
-        </header>
+          </header>
 
-        <section class="main-grid" aria-label="工作台">
-          <section class="panel control-panel" aria-labelledby="control-title">
-            <div class="panel-heading">
-              <div>
-                <h2 id="control-title">录音控制</h2>
-                <p class="panel-note">按住最核心的入口，不要让用户先读说明。</p>
-              </div>
-              <span class="mini-chip" id="sourceBadge">麦克风</span>
-            </div>
-
-            <div class="control-body">
+          <section class="overview-card" aria-label="输入状态">
+            <div class="dictation-console">
               <button class="record-button" id="recordButton" type="button" aria-pressed="false">
                 <span class="record-ring">
                   <i data-lucide="mic"></i>
                 </span>
                 <span id="recordButtonText">开始说话</span>
               </button>
-
-              <div class="control-stack">
-                <div class="meter" id="meter" aria-hidden="true">
-                  <span></span><span></span><span></span><span></span>
-                  <span></span><span></span><span></span><span></span>
-                </div>
-                <p class="timer" id="timer">00:00</p>
-                <p class="control-hint" id="controlHint">开始后会持续发送音频帧。</p>
+              <div class="meter" id="meter" aria-hidden="true">
+                <span></span><span></span><span></span><span></span>
+                <span></span><span></span><span></span><span></span>
               </div>
+              <p class="timer" id="timer">00:00</p>
+              <p class="control-hint" id="controlHint">桌面端将从系统麦克风采集。</p>
             </div>
 
-            <div class="control-meta">
-              <div class="mini-stat">
-                <span>输入格式</span>
-                <strong>PCM / 16kHz</strong>
-              </div>
-              <div class="mini-stat">
-                <span>连接方式</span>
-                <strong>WebSocket</strong>
-              </div>
-              <div class="mini-stat">
-                <span>输出节奏</span>
-                <strong>边说边出字</strong>
-              </div>
+            <div class="metrics-grid" aria-label="输入统计">
+              <article class="metric-card">
+                <i data-lucide="keyboard"></i>
+                <strong id="todayChars">0 字</strong>
+                <span>今日口述字数</span>
+              </article>
+              <article class="metric-card">
+                <i data-lucide="timer"></i>
+                <strong id="todayMinutes">0 min</strong>
+                <span>今日口述时间</span>
+              </article>
+              <article class="metric-card">
+                <i data-lucide="zap"></i>
+                <strong id="averageSpeed">0 字/分</strong>
+                <span>平均口述速度</span>
+              </article>
+              <article class="metric-card">
+                <i data-lucide="book-marked"></i>
+                <strong id="hotWordsMetric">0 个</strong>
+                <span>用户热词</span>
+              </article>
             </div>
           </section>
 
-          <section class="result-column" aria-label="转写结果">
-            <article class="panel transcript-panel" aria-labelledby="transcript-title">
-              <div class="panel-heading">
+          <section class="home-grid">
+            <article class="soft-card last-input-card" aria-labelledby="last-input-title">
+              <div class="section-heading">
                 <div>
-                  <h2 id="transcript-title">实时转写</h2>
-                  <p class="panel-note">这里显示当前帧输出的文本。</p>
+                  <h2 id="last-input-title">最后一次输入</h2>
+                  <p id="transcriptMeta">等待语音输入</p>
                 </div>
                 <span class="mini-chip" id="liveStateBadge">等待输入</span>
               </div>
-              <pre class="text-box empty" id="transcriptText">点击“开始说话”后，这里会显示识别结果。</pre>
+              <pre class="text-box empty" id="transcriptText">还没有转写内容。</pre>
+              <div class="action-bar" aria-label="输入操作">
+                <button class="ghost-button" id="copyOriginalButton" type="button">
+                  <i data-lucide="copy"></i>
+                  复制
+                </button>
+                <button class="ghost-button" id="clearButton" type="button">
+                  <i data-lucide="trash-2"></i>
+                  清空
+                </button>
+              </div>
             </article>
 
-            <article class="panel diagnostics-panel" aria-labelledby="diagnostic-title">
-              <div class="panel-heading">
+            <article class="soft-card shortcut-card" aria-labelledby="shortcut-title">
+              <div class="section-heading">
+                <div>
+                  <h2 id="shortcut-title">输入方式</h2>
+                  <p id="sessionMeta">未开始</p>
+                </div>
+                <span class="mini-chip" id="sourceBadge">麦克风</span>
+              </div>
+              <div class="shortcut-list">
+                <div>
+                  <span>输入格式</span>
+                  <strong>PCM / 16kHz</strong>
+                </div>
+                <div>
+                  <span>连接方式</span>
+                  <strong>WebSocket</strong>
+                </div>
+                <div>
+                  <span>输出节奏</span>
+                  <strong>边说边出字</strong>
+                </div>
+              </div>
+            </article>
+          </section>
+        </section>
+
+        <section class="page-view" data-page="history" aria-labelledby="history-title">
+          <header class="page-header">
+            <div>
+              <h1 id="history-title">历史记录</h1>
+              <p>最近的语音输入会保留在这里，方便重新复制和回看。</p>
+            </div>
+            <span class="mini-chip" id="historyCount">0 条</span>
+          </header>
+          <div class="history-list" id="historyList">
+            <div class="empty-state">
+              <i data-lucide="clock-3"></i>
+              <strong>还没有历史记录</strong>
+              <span>完成一次转写后，这里会出现最近输入。</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="page-view" data-page="dictionary" aria-labelledby="dictionary-title">
+          <header class="page-header">
+            <div>
+              <h1 id="dictionary-title">词典</h1>
+              <p>记住那些属于你的重要词汇。</p>
+            </div>
+            <div class="page-actions">
+              <button class="ghost-button" id="clearHotWordsButton" type="button">
+                <i data-lucide="eraser"></i>
+                清空
+              </button>
+              <button class="ghost-button" id="saveHotWordsButton" type="button">
+                <i data-lucide="save"></i>
+                保存
+              </button>
+              <button class="primary-button" id="syncHotWordsButton" type="button">
+                <i data-lucide="refresh-cw"></i>
+                同步热词
+              </button>
+            </div>
+          </header>
+
+          <section class="dictionary-editor">
+            <textarea
+              class="hotwords-input"
+              id="hotWordsInput"
+              spellcheck="false"
+              maxlength="6000"
+              placeholder="请按每行一个词的格式输入&#10;DashScope&#10;WebSocket&#10;Electron&#10;实时转写"
+            ></textarea>
+            <div class="dictionary-meta">
+              <span id="hotWordsStatus">未加载</span>
+              <span id="hotWordsCount">0/300 热词</span>
+            </div>
+          </section>
+
+          <section class="dictionary-list-card" aria-labelledby="dictionary-list-title">
+            <div class="section-heading">
+              <div>
+                <h2 id="dictionary-list-title">管理热词</h2>
+                <p>保存后同步到 ASR，下一次录音生效。</p>
+              </div>
+              <i data-lucide="search"></i>
+            </div>
+            <div class="word-chip-list" id="hotWordsPreview">
+              <div class="empty-state compact">
+                <i data-lucide="book-open"></i>
+                <strong>还没有任何热词</strong>
+                <span>我会记住你独特的名称和词汇。</span>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <section class="page-view" data-page="settings" aria-labelledby="settings-title">
+          <header class="page-header">
+            <div>
+              <h1 id="settings-title">设置</h1>
+              <p>快捷键、模型和诊断信息集中放在这里。</p>
+            </div>
+          </header>
+
+          <section class="settings-grid">
+            <article class="soft-card">
+              <div class="section-heading">
+                <div>
+                  <h2>快捷键</h2>
+                  <p>当前默认组合键。</p>
+                </div>
+              </div>
+              <div class="setting-line">
+                <span>开始/停止语音输入</span>
+                <strong>Ctrl + Shift + Space</strong>
+              </div>
+            </article>
+
+            <article class="soft-card diagnostics-panel" aria-labelledby="diagnostic-title">
+              <div class="section-heading">
                 <div>
                   <h2 id="diagnostic-title">会话诊断</h2>
-                  <p class="panel-note">保留 trace、request、延迟和失败原因。</p>
+                  <p>保留 trace、request、延迟和失败原因。</p>
                 </div>
                 <span class="mini-chip" id="resultCount">0 字</span>
               </div>
-
               <div class="diagnostic-grid">
                 <div class="diagnostic-item">
                   <span class="diagnostic-label">Trace</span>
@@ -114,19 +268,21 @@
                   <strong id="errorValue">-</strong>
                 </div>
               </div>
-
-              <div class="action-bar" aria-label="操作">
-                <button class="ghost-button" id="copyOriginalButton" type="button">
-                  <i data-lucide="copy"></i>
-                  复制转写
-                </button>
-                <button class="ghost-button" id="clearButton" type="button">
-                  <i data-lucide="trash-2"></i>
-                  清空
-                </button>
-              </div>
             </article>
           </section>
+        </section>
+
+        <section class="page-view" data-page="feedback" aria-labelledby="feedback-title">
+          <header class="page-header">
+            <div>
+              <h1 id="feedback-title">反馈</h1>
+              <p>后续这里会收集识别错误、粘贴失败和应用建议。</p>
+            </div>
+          </header>
+          <article class="soft-card feedback-card">
+            <strong>先记一条最重要的反馈</strong>
+            <span>如果某个词总是识别错，把它加入词典并同步热词。</span>
+          </article>
         </section>
 
         <p class="feedback" id="feedback" role="status" aria-live="polite"></p>

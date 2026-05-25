@@ -50,6 +50,7 @@ function createMainWindow() {
     minHeight: 620,
     show: false,
     title: "VoiceAssistant",
+    autoHideMenuBar: true,
     backgroundColor: "#f6f5f1",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
